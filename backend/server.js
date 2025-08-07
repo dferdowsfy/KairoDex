@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const { createClient } = require('@supabase/supabase-js');
 const OpenAI = require('openai');
+const axios = require('axios');
 const multer = require('multer');
 const fs = require('fs');
 const path = require('path');
@@ -18,6 +19,8 @@ const {
   validateLogin,
   validatePasswordChange
 } = require('./auth');
+const { createDocuSignClient, DOCUSIGN_CONFIG, generateConsentUrl } = require('./docusign-config');
+const { MockDocuSignClient } = require('./docusign-mock');
 require('dotenv').config();
 
 const app = express();
@@ -98,9 +101,14 @@ const supabaseKey = process.env.SUPABASE_KEY;
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 // Initialize OpenAI client
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+let openai = null;
+if (process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY !== 'your_openai_api_key_here') {
+  openai = new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY,
+  });
+} else {
+  console.log('⚠️  OpenAI API key not configured. AI features will be disabled.');
+}
 
 // Helper function to get latest client note
 async function getLatestClientNote(clientId) {
@@ -164,6 +172,11 @@ async function logGeneratedMessage(agentId, clientId, message) {
 // Generate follow-up message using OpenAI
 async function generateFollowUpMessage(clientNote, agentMessages) {
   try {
+    // Check if OpenAI is available
+    if (!openai) {
+      return `Hi there! I wanted to follow up on your recent inquiry. I've reviewed your information and would love to discuss how I can help you with your real estate needs. Please let me know when would be a good time to connect, or if you have any specific questions about the current market. I'm here to help make your real estate journey as smooth as possible!`;
+    }
+
     // Extract key details from client note for more specific prompting
     const clientDetails = extractClientDetails(clientNote);
     
@@ -203,7 +216,7 @@ INSTRUCTIONS:
 DO NOT use generic examples or placeholder text. Use ONLY the actual information provided.`;
 
     const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: "gpt-4.1-mini-2025-04-14",
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt }
@@ -215,7 +228,8 @@ DO NOT use generic examples or placeholder text. Use ONLY the actual information
     return response.choices[0].message.content;
   } catch (error) {
     console.error('Error generating follow-up message:', error);
-    throw error;
+    // Return a fallback message if OpenAI fails
+    return `Hi there! I wanted to follow up on your recent inquiry. I've reviewed your information and would love to discuss how I can help you with your real estate needs. Please let me know when would be a good time to connect, or if you have any specific questions about the current market. I'm here to help make your real estate journey as smooth as possible!`;
   }
 }
 
@@ -1183,6 +1197,216 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'OK', timestamp: new Date().toISOString() });
 });
 
+// Lightweight contracts templates API (optional DB-backed; returns [] if not configured)
+app.get('/api/contracts/templates', authenticateToken, async (req, res) => {
+  try {
+    const state = req.query.state;
+    if (!state) {
+      return res.status(400).json({ success: false, error: 'state is required' });
+    }
+    try {
+      const { data, error } = await supabase
+        .from('contracts_templates_current')
+        .select('state, document_type, template_id, templates:template_id (content, version, source)')
+        .eq('state', state)
+        .order('document_type', { ascending: true });
+      if (error) {
+        console.warn('Supabase templates error:', error.message);
+        return res.json({ success: true, data: [] });
+      }
+      const docs = (data || []).map((row) => ({
+        name: row.document_type.replaceAll('_', ' ').replace(/\b\w/g, (m) => m.toUpperCase()),
+        content: row.templates?.content || '',
+        version: row.templates?.version || 'v1',
+        source: row.templates?.source || undefined
+      }));
+      res.json({ success: true, data: docs });
+    } catch (dbErr) {
+      console.warn('Templates endpoint fallback:', dbErr.message);
+      res.json({ success: true, data: [] });
+    }
+  } catch (e) {
+    res.status(500).json({ success: false, error: 'Internal server error', details: e.message });
+  }
+});
+
+// Generate a full set of residential real estate documents for a state
+app.get('/api/contracts/generate', authenticateToken, async (req, res) => {
+  try {
+    const state = (req.query.state || '').toString();
+    const yearBuiltRaw = req.query.yearBuilt;
+    if (!state) {
+      return res.status(400).json({ success: false, error: 'state is required' });
+    }
+
+    const yearBuilt = yearBuiltRaw ? parseInt(yearBuiltRaw, 10) : undefined;
+    const includeLead = Number.isInteger(yearBuilt) ? yearBuilt < 1978 : undefined;
+
+    const docs = buildStateContracts(state, includeLead);
+
+    res.json({ success: true, data: docs });
+  } catch (e) {
+    console.error('Error generating state contracts:', e);
+    res.status(500).json({ success: false, error: 'Internal server error', details: e.message });
+  }
+});
+
+function buildStateContracts(state, includeLead) {
+  const s = state.trim();
+  const tone = getStatePhrasing(s);
+
+  const purchaseAgreement = buildDocument(
+    `${s} Residential Real Estate Purchase Agreement`,
+    `This agreement sets forth the terms for the purchase and sale of residential real property located in ${s}.` ,
+    [
+      section('Parties', `This agreement (the "Agreement") is entered into on [Date] by and between [Buyer Name] ("Buyer") and [Seller Name] ("Seller").`),
+      section('Property Description', `The real property commonly known as [Property Address], ${s}, together with all improvements and appurtenances (the "Property"). Legal description (if available): [Legal Description].`),
+      section('Purchase Price and Earnest Money', `The total purchase price is $[Purchase Price]. Buyer shall deposit earnest money in the amount of $[Earnest Money] with [Escrow/Title Company] within [X] business days of acceptance. ${tone.earnestMoneyHandling}`),
+      section('Financing', `${tone.financing}`),
+      section('Inspections and Due Diligence', `${tone.inspectionPeriod}`),
+      section('Disclosures', `${tone.disclosures}`),
+      section('Title and Closing', `${tone.titleAndClosing}`),
+      section('Risk of Loss and Possession', `${tone.possession}`),
+      section('Default and Remedies', `${tone.defaultRemedies}`),
+      section('Additional Terms', `Addenda incorporated by reference: [List Applicable Addenda]. Any handwritten or typed additions control over pre-printed text to the extent of conflict.`),
+      section('Governing Law', `This Agreement shall be governed by and construed in accordance with the laws of the State of ${s}. ${tone.lawReference}`),
+      section('Signatures', `Buyer: ____________________ Date: ________\nSeller: ____________________ Date: ________`)
+    ]
+  );
+
+  const sellerDisclosure = buildDocument(
+    `${s} Seller Property Disclosure`,
+    `This disclosure is provided by the Seller regarding known material facts about the Property located in ${s}.`,
+    [
+      section('Seller Information', `Seller Name(s): [Seller]. Property Address: [Property Address], ${s}.`),
+      section('Structural/Systems', `To the best of Seller's knowledge, indicate known conditions or defects: foundation, roof, plumbing, electrical, HVAC, appliances, pool/spa (if any), and other systems. Attach reports if available.`),
+      section('Environmental/Health', `Known environmental conditions: mold/moisture, radon, asbestos, underground tanks, soil or drainage issues. ${tone.environmental}`),
+      section('Legal/Title Matters', `Encroachments, easements, zoning issues, HOA governing documents, assessments, pending litigation or notices affecting the Property.`),
+      section('Repairs/Improvements', `Known repairs or improvements made during Seller's ownership, including permits if applicable.`),
+      section('Utilities/Septic/Water', `Water source, sewer/septic system details, known leaks or backups, utility providers.`),
+      section('Disclosure Acknowledgment', `Seller certifies the information is true and correct to the best of Seller’s knowledge as of the date signed. Buyer acknowledges receipt and is advised to conduct independent inspections.`),
+      section('Signatures', `Seller: ____________________ Date: ________\nBuyer: ____________________ Date: ________`)
+    ]
+  );
+
+  const leadDisclosure = buildDocument(
+    `Lead-Based Paint Disclosure (${s})`,
+    `Federal law requires disclosure of known lead-based paint and/or lead-based paint hazards for residential property built before 1978.`,
+    [
+      section('Applicability', includeLead === undefined
+        ? `This disclosure applies if the residential dwelling was constructed prior to 1978. If the Property was built in 1978 or later, this disclosure is not required.`
+        : includeLead
+          ? `The Property was constructed prior to 1978; this disclosure is required.`
+          : `The Property was constructed in 1978 or later; this disclosure is provided for completeness but is not required.`),
+      section('Seller Disclosure', `Seller has (check one): [ ] knowledge of lead-based paint and/or hazards; [ ] no knowledge of lead-based paint and/or hazards. Explain: [Explanation].`),
+      section('Records/Reports', `Seller has provided Buyer with all available records and reports pertaining to lead-based paint and/or hazards: [List or N/A].`),
+      section('Buyer Acknowledgment', `Buyer acknowledges receipt of this disclosure and the EPA pamphlet "Protect Your Family From Lead in Your Home." Buyer had a [10]-day opportunity to conduct a lead-based paint inspection or risk assessment.`),
+      section('Signatures', `Seller: ____________________ Date: ________\nBuyer: ____________________ Date: ________`)
+    ]
+  );
+
+  const agencyDisclosure = buildDocument(
+    `${s} Agency Disclosure`,
+    `This disclosure describes the brokerage relationships offered and the duties owed by real estate licensees in ${s}.`,
+    [
+      section('Brokerage Relationships', `${tone.agencyIntro}`),
+      section('Duties Owed', `${tone.dutiesOwed}`),
+      section('Consent and Acknowledgment', `Buyer and Seller acknowledge they have read and understand this Agency Disclosure and consent to the selected representation.`),
+      section('Signatures', `Buyer: ____________________ Date: ________\nSeller: ____________________ Date: ________\nBroker/Licensee: ____________________ Date: ________`)
+    ]
+  );
+
+  const addenda = buildDocument(
+    `${s} State-Required Addenda`,
+    `This document compiles state-required and common addenda that may apply to the transaction in ${s}. Complete sections as applicable.`,
+    [
+      section('HOA/Common Interest Community Addendum', `${tone.hoa}`),
+      section('Flood Zone Notice', `${tone.flood}`),
+      section('Wire Fraud Advisory', `${tone.wireFraud}`),
+      section('Water/Septic/Well Disclosures (If Applicable)', `If the Property is served by well or septic, provide disclosures, tests, permits and maintenance records as required in ${s}.`),
+      section('Other State/Local Addenda', `Insert any additional ${s}-specific or local disclosures (e.g., airport influence, coastal hazards, seismic/earthquake, wood-destroying organism reports) as applicable.`),
+      section('Signatures', `Buyer: ____________________ Date: ________\nSeller: ____________________ Date: ________`)
+    ]
+  );
+
+  const docs = [
+    { name: 'Residential Purchase Agreement', content: purchaseAgreement },
+    { name: 'Seller Property Disclosure', content: sellerDisclosure },
+    // Lead disclosure included if applicable or left with conditional language when not specified
+    ...(includeLead === undefined || includeLead === true
+      ? [{ name: 'Lead-Based Paint Disclosure', content: leadDisclosure }]
+      : []),
+    { name: 'Agency Disclosure', content: agencyDisclosure },
+    { name: 'State-Required Addenda', content: addenda }
+  ];
+
+  return docs;
+}
+
+function buildDocument(title, purpose, sections) {
+  const header = `Document: ${title}`;
+  const purposeText = `${purpose}`;
+  const body = sections.map(({ heading, text }, idx) => `${idx + 1}. ${heading}\n${text}`).join('\n\n');
+  return `${header}\n\n${purposeText}\n\n${body}`;
+}
+
+function section(heading, text) {
+  return { heading, text };
+}
+
+function getStatePhrasing(state) {
+  const generic = {
+    lawReference: 'The parties acknowledge obligations under applicable federal and state statutes and regulations.',
+    earnestMoneyHandling: 'Earnest money shall be held in escrow and applied to the purchase price at closing unless otherwise provided.',
+    financing: 'This Agreement is [ ] cash; [ ] contingent upon Buyer obtaining financing on terms acceptable to Buyer within [X] days. Buyer shall act diligently to obtain such financing.',
+    inspectionPeriod: 'Buyer shall have an inspection/due diligence period of [10] days to conduct all desired inspections and reviews. Buyer may cancel prior to expiration if dissatisfied, in which case earnest money shall be returned, subject to the terms herein.',
+    disclosures: 'Seller shall provide all disclosures required by law in the State, including but not limited to property condition disclosures and any local disclosures.',
+    titleAndClosing: 'Seller shall convey marketable title by [Warranty/Grant] Deed subject only to permitted exceptions. Closing shall occur on or before [Closing Date] at a place/time mutually agreed by the parties.',
+    possession: 'Possession shall be delivered to Buyer upon closing and funding unless otherwise agreed in writing.',
+    defaultRemedies: 'If Buyer defaults, Seller may pursue contract remedies and/or retain earnest money as liquidated damages if so provided. If Seller defaults, Buyer may pursue contract remedies including specific performance or return of earnest money.',
+    agencyIntro: 'Licensees may act as Buyer’s agent, Seller’s agent, or under limited/dual representation where permitted by law with informed written consent.',
+    dutiesOwed: 'Licensees owe fiduciary duties where applicable, and in all cases, duties of honesty, fair dealing, reasonable care, and disclosure of material facts. Confidential information shall be protected consistent with law.',
+    hoa: 'If the Property is within a common interest community/HOA, Buyer acknowledges receipt (or timely delivery) of governing documents, CC&Rs, bylaws, rules, assessments, transfer fees, and disclosure summaries as required by law. Buyer shall have a review period after receipt to cancel as permitted.',
+    flood: 'Buyer is advised to determine flood hazard status through FEMA or local authorities, obtain flood insurance quotes where indicated, and review any required state/local flood disclosures.',
+    wireFraud: 'All parties acknowledge the risk of wire fraud. Parties agree to independently verify wiring instructions with the escrow/title company using verified contact methods before transmitting funds. Parties shall not rely solely on emailed instructions.'
+  };
+
+  const map = {
+    Arizona: {
+      ...generic,
+      lawReference: 'References include the Arizona Revised Statutes and applicable administrative rules.',
+      inspectionPeriod: 'Buyer shall have a standard inspection period of [10] days (or as otherwise agreed) to complete inspections and due diligence. Failure to timely cancel constitutes acceptance of the Property condition as provided.',
+      financing: 'This Agreement is [ ] cash; [ ] contingent upon Buyer obtaining a loan approval on terms acceptable to Buyer within [X] days. Buyer will diligently pursue loan application and provide necessary documentation.'
+    },
+    California: {
+      ...generic,
+      lawReference: 'References include the California Civil Code and related real estate regulations.',
+      inspectionPeriod: 'Buyer shall have an inspection period of [17] days (unless otherwise agreed) to complete inspections and investigations. Buyer may request repairs or cancel as permitted under the Agreement.',
+      financing: 'This Agreement is [ ] cash; [ ] contingent upon Buyer obtaining financing within [X] days, including appraisal satisfactory to lender if applicable.'
+    },
+    Texas: {
+      ...generic,
+      lawReference: 'References include the Texas Property Code and TREC rules where applicable.',
+      inspectionPeriod: 'Buyer may negotiate an Option Period of [10] days for unrestricted termination in exchange for an Option Fee, during which inspections and negotiations may occur.',
+      financing: 'This Agreement is [ ] cash; [ ] contingent upon Buyer obtaining third-party financing approval within [X] days pursuant to a Third Party Financing Addendum if used.'
+    },
+    Florida: {
+      ...generic,
+      lawReference: 'References include the Florida Statutes and Florida Administrative Code, where applicable.',
+      inspectionPeriod: 'Buyer shall have an inspection period of [10-15] days or as agreed to conduct inspections and cancel or proceed consistent with contract terms.',
+      financing: 'This Agreement is [ ] cash; [ ] contingent upon Buyer obtaining financing within [X] days. Time is of the essence where stated.'
+    },
+    'New York': {
+      ...generic,
+      lawReference: 'References include the New York General Obligations Law and relevant regulations.',
+      inspectionPeriod: 'Buyer may complete inspections prior to contract signing or within [X] days as negotiated. Attorney review periods may apply depending on local practice.',
+      financing: 'Where a mortgage contingency is used, Buyer shall obtain a commitment within [X] days on terms acceptable to Buyer or may cancel in accordance with the contingency.'
+    }
+  };
+
+  return map[state] || generic;
+}
+
 // Gmail OAuth Endpoints
 
 // 1. Initiate Gmail OAuth flow
@@ -1360,45 +1584,71 @@ app.post('/api/auth/gmail/disconnect', authenticateToken, (req, res) => {
 // Contract amendment endpoint
 app.post('/api/contract-amendment', authenticateToken, async (req, res) => {
   try {
-    const { contract, instruction, clientId } = req.body;
+    const { contractContent, amendmentInstruction, jurisdiction, clientId } = req.body;
     const userId = req.user.userId;
 
-    if (!contract || !instruction || !clientId) {
+    if (!contractContent || !amendmentInstruction || !clientId) {
       return res.status(400).json({
         success: false,
-        error: 'contract, instruction, and clientId are required'
+        error: 'contractContent, amendmentInstruction, and clientId are required'
       });
     }
 
     // Create the prompt for OpenAI
-    const prompt = `You are a contract amendment assistant. Given the following contract and instruction, return an updated version with only the changed sections. Make changed text bold using Markdown.
+    const prompt = `You are a contract amendment assistant for real estate contracts. Given the following contract and modification instruction, return a complete updated version of the contract with the requested changes applied.
 
-Contract:
-${contract}
+Jurisdiction: ${jurisdiction || 'Not specified'}
 
-Instruction:
-${instruction}
+Original Contract:
+${contractContent}
 
-Please return only the amended contract with changes marked in **bold**. Do not include any explanations or additional text.`;
+Modification Instruction:
+${amendmentInstruction}
 
-    // Call OpenAI API
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4",
-      messages: [
-        {
-          role: "system",
-          content: "You are a professional contract amendment assistant. You make precise changes to contracts based on instructions and mark all changes in bold using Markdown syntax."
-        },
-        {
-          role: "user",
-          content: prompt
-        }
-      ],
-      temperature: 0.1,
-      max_tokens: 4000
-    });
+Please return the complete amended contract with all changes applied. Make any modified sections bold using **Markdown syntax**. Ensure the contract remains legally sound and follows standard real estate contract formatting.`;
 
-    const amendedContract = completion.choices[0].message.content;
+    let amendedContract;
+    
+    // Check if OpenAI is available
+    if (!openai) {
+      amendedContract = `**CONTRACT AMENDMENT NOTICE**
+
+**AI Contract Amendment Service Temporarily Unavailable**
+
+The contract amendment service requires an OpenAI API key to function. Please add a valid OpenAI API key to your .env file to enable AI-powered contract amendments.
+
+**Original Contract:**
+${contractContent}
+
+**Requested Amendment:**
+${amendmentInstruction}
+
+**To enable AI contract amendments:**
+1. Get an OpenAI API key from https://platform.openai.com/api-keys
+2. Add it to your .env file: OPENAI_API_KEY=your_actual_key_here
+3. Restart the server
+
+For now, please manually review and amend the contract based on the instruction provided.`;
+    } else {
+      // Call OpenAI API
+      const completion = await openai.chat.completions.create({
+        model: "gpt-4.1-mini-2025-04-14",
+        messages: [
+          {
+            role: "system",
+            content: "You are a professional real estate contract amendment assistant with expertise in real estate law and contract drafting. You make precise, legally sound changes to contracts based on instructions and mark all changes in bold using Markdown syntax. Always ensure the contract remains legally valid and follows standard real estate contract formatting."
+          },
+          {
+            role: "user",
+            content: prompt
+          }
+        ],
+        temperature: 0.1,
+        max_tokens: 4000
+      });
+
+      amendedContract = completion.choices[0].message.content;
+    }
 
     // Log the amendment request (optional - don't fail if tables don't exist)
     try {
@@ -1408,8 +1658,10 @@ Please return only the amended contract with changes marked in **bold**. Do not 
           {
             agent_id: userId,
             client_id: clientId,
-            original_contract: contract,
-            instruction: instruction,
+            original_contract: contractContent,
+            instruction: amendmentInstruction,
+            jurisdiction: jurisdiction || null,
+            document: contractDocument || null,
             amended_contract: amendedContract,
             created_at: new Date().toISOString()
           }
@@ -1426,9 +1678,7 @@ Please return only the amended contract with changes marked in **bold**. Do not 
 
     res.json({
       success: true,
-      data: {
-        amendedContract: amendedContract
-      }
+      amendedContract: amendedContract
     });
 
   } catch (error) {
@@ -1454,7 +1704,7 @@ Please return only the amended contract with changes marked in **bold**. Do not 
 // Save amended contract endpoint
 app.post('/api/save-amended-contract', authenticateToken, async (req, res) => {
   try {
-    const { clientId, originalContract, amendedContract, instruction } = req.body;
+    const { clientId, originalContract, amendedContract, instruction, jurisdiction, document } = req.body;
     const userId = req.user.userId;
 
     if (!clientId || !originalContract || !amendedContract || !instruction) {
@@ -1475,6 +1725,8 @@ app.post('/api/save-amended-contract', authenticateToken, async (req, res) => {
             original_contract: originalContract,
             amended_contract: amendedContract,
             instruction: instruction,
+            jurisdiction: jurisdiction || null,
+            document: document || null,
             created_at: new Date().toISOString()
           }
         ])
@@ -1507,6 +1759,685 @@ app.post('/api/save-amended-contract', authenticateToken, async (req, res) => {
       details: error.message
     });
   }
+});
+
+// Get contract history endpoint
+app.get('/api/contract-history', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { clientId } = req.query;
+
+    // Get contracts from Supabase (optional - don't fail if tables don't exist)
+    try {
+      let query = supabase
+        .from('amended_contracts')
+        .select('*')
+        .eq('agent_id', userId)
+        .order('created_at', { ascending: false });
+
+      if (clientId) {
+        query = query.eq('client_id', clientId);
+      }
+
+      const { data, error } = await query;
+
+      if (error) {
+        console.error('Supabase error:', error);
+        // Return empty array if database query fails
+        res.json({
+          success: true,
+          data: []
+        });
+        return;
+      }
+
+      res.json({
+        success: true,
+        data: data || []
+      });
+
+    } catch (dbError) {
+      console.error('Database query failed (tables may not exist):', dbError.message);
+      // Return empty array if database query fails
+      res.json({
+        success: true,
+        data: []
+      });
+    }
+
+  } catch (error) {
+    console.error('Error getting contract history:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+      details: error.message
+    });
+  }
+});
+
+// Upload client notes endpoint
+app.post('/api/upload-client-notes', authenticateToken, upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        error: 'No file uploaded'
+      });
+    }
+
+    const { clientId } = req.body;
+    const userId = req.user.userId;
+
+    if (!clientId) {
+      return res.status(400).json({
+        success: false,
+        error: 'clientId is required'
+      });
+    }
+
+    let content = '';
+
+    // Extract text content based on file type
+    if (req.file.mimetype === 'text/plain') {
+      content = fs.readFileSync(req.file.path, 'utf8');
+    } else if (req.file.mimetype === 'application/pdf') {
+      // For PDF files, you might want to use a PDF parsing library
+      // For now, we'll return a placeholder
+      content = `PDF file uploaded: ${req.file.originalname}. Content extraction not implemented yet.`;
+    } else if (req.file.mimetype.includes('wordprocessingml.document') || req.file.mimetype === 'application/msword') {
+      // Extract text from Word documents
+      try {
+        const result = await mammoth.extractRawText({ path: req.file.path });
+        content = result.value;
+      } catch (mammothError) {
+        console.error('Error extracting text from Word document:', mammothError);
+        content = `Word document uploaded: ${req.file.originalname}. Text extraction failed.`;
+      }
+    } else {
+      content = `File uploaded: ${req.file.originalname}. Content extraction not supported for this file type.`;
+    }
+
+    // Save to database (optional - don't fail if tables don't exist)
+    try {
+      const { data, error } = await supabase
+        .from('client_notes')
+        .insert([
+          {
+            agent_id: userId,
+            client_id: clientId,
+            file_path: req.file.path,
+            content: content,
+            created_at: new Date().toISOString()
+          }
+        ])
+        .select();
+
+      if (error) {
+        console.error('Supabase error:', error);
+        // Don't fail the request if database save fails
+      }
+    } catch (dbError) {
+      console.error('Database save failed (tables may not exist):', dbError.message);
+      // Continue with the response even if database save fails
+    }
+
+    res.json({
+      success: true,
+      content: content,
+      fileName: req.file.originalname
+    });
+
+  } catch (error) {
+    console.error('Error uploading client notes:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+      details: error.message
+    });
+  }
+});
+
+// Test DocuSign configuration endpoint
+app.get('/api/docusign/test-config', async (req, res) => {
+  try {
+    console.log('🧪 Testing DocuSign configuration...');
+    
+    // Test JWT creation
+    const { createJwtAssertion } = require('./docusign-config');
+    const jwt = createJwtAssertion();
+    console.log('✅ JWT created successfully');
+    
+    // Test access token
+    const { getAccessToken } = require('./docusign-config');
+    const accessToken = await getAccessToken();
+    console.log('✅ Access token received:', accessToken ? 'YES' : 'NO');
+    
+    // Test client creation
+    const { createDocuSignClient } = require('./docusign-config');
+    const apiClient = await createDocuSignClient();
+    console.log('✅ DocuSign client created successfully');
+    
+    res.json({
+      success: true,
+      message: 'DocuSign configuration is working correctly',
+      hasAccessToken: !!accessToken,
+      hasClient: !!apiClient
+    });
+  } catch (error) {
+    console.error('❌ DocuSign configuration test failed:', error.message);
+    res.status(500).json({
+      success: false,
+      error: 'DocuSign configuration test failed',
+      details: error.message
+    });
+  }
+});
+
+// ===== DOCUSIGN INTEGRATION ENDPOINTS =====
+
+// Get DocuSign consent URL
+app.get('/api/docusign/consent', authenticateToken, (req, res) => {
+  try {
+    const consentUrl = generateConsentUrl();
+    res.json({
+      success: true,
+      data: {
+        consentUrl: consentUrl
+      }
+    });
+  } catch (error) {
+    console.error('Error generating consent URL:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to generate consent URL',
+      details: error.message
+    });
+  }
+});
+
+// DocuSign consent callback
+app.get('/api/docusign/consent-callback', (req, res) => {
+  const { code } = req.query;
+  
+  if (!code) {
+    // Send error message to parent window
+    const errorHtml = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>DocuSign Authorization</title>
+        </head>
+        <body>
+          <script>
+            if (window.opener) {
+              window.opener.postMessage({
+                type: 'DOCUSIGN_CONSENT_ERROR',
+                error: 'Authorization code is required'
+              }, 'http://localhost:3000');
+              window.close();
+            } else {
+              window.location.href = 'http://localhost:3000/dashboard?error=consent_failed';
+            }
+          </script>
+          <p>Authorization failed. Redirecting...</p>
+        </body>
+      </html>
+    `;
+    return res.send(errorHtml);
+  }
+  
+  // In a real implementation, you would exchange the code for an access token
+  // For now, we'll send a success message to the parent window
+  const successHtml = `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <title>DocuSign Authorization</title>
+      </head>
+      <body>
+        <script>
+          if (window.opener) {
+            window.opener.postMessage({
+              type: 'DOCUSIGN_CONSENT_SUCCESS',
+              code: '${code}'
+            }, 'http://localhost:3000');
+            window.close();
+          } else {
+            window.location.href = 'http://localhost:3000/dashboard?consent=success&code=${code}';
+          }
+        </script>
+        <p>Authorization successful! Closing window...</p>
+      </body>
+    </html>
+  `;
+  
+  res.send(successHtml);
+});
+
+// Create DocuSign envelope with modified contract
+app.post('/api/docusign/create-envelope', authenticateToken, async (req, res) => {
+  try {
+    const { contractContent, clientName, clientEmail, subject } = req.body;
+    const userId = req.user.userId;
+
+    if (!contractContent || !clientName || !clientEmail) {
+      return res.status(400).json({
+        success: false,
+        error: 'contractContent, clientName, and clientEmail are required'
+      });
+    }
+
+    // Create DocuSign client
+    let envelopesApi;
+    let useMock = false;
+    
+    try {
+      console.log('🔐 Attempting to create real DocuSign client...');
+      const apiClient = await createDocuSignClient();
+      envelopesApi = new (require('docusign-esign').EnvelopesApi)(apiClient);
+      console.log('✅ Real DocuSign client created successfully');
+    } catch (error) {
+      console.error('❌ DocuSign client creation error:', error.message);
+      console.error('Full error details:', error);
+      
+      // Check if consent is required
+      if (error.message === 'consent_required') {
+        return res.status(401).json({
+          success: false,
+          error: 'consent_required',
+          message: 'DocuSign consent is required. Please authorize the application first.'
+        });
+      }
+      
+      // For now, let's force real DocuSign usage and not fall back to mock
+      console.error('🚫 DocuSign authentication failed. Please check your configuration.');
+      return res.status(500).json({
+        success: false,
+        error: 'DocuSign authentication failed',
+        details: error.message,
+        message: 'Please ensure DocuSign is properly configured and authorized.'
+      });
+      
+      // Uncomment the lines below if you want to use mock for testing
+      // console.log('🔧 Using mock DocuSign service for testing...');
+      // const mockClient = new MockDocuSignClient();
+      // envelopesApi = mockClient.envelopesApi;
+      // useMock = true;
+    }
+
+    // Create document
+    const document = {
+      documentBase64: Buffer.from(contractContent).toString('base64'),
+      name: 'Contract Document',
+      fileExtension: 'txt',
+      documentId: '1'
+    };
+
+    // Create recipient
+    const signer = {
+      email: clientEmail,
+      name: clientName,
+      recipientId: '1',
+      routingOrder: '1'
+    };
+
+    // Create sign here tab
+    const signHereTab = {
+      anchorString: '/sn1/',
+      anchorUnits: 'pixels',
+      anchorYOffset: '10',
+      anchorXOffset: '20'
+    };
+
+    // Create recipient view
+    // Prepare sender view (embedded sending) so the agent can place fields and send
+    const returnUrlRequest = {
+      returnUrl: 'http://localhost:3000/dashboard?envelopeId={envelopeId}'
+    };
+
+    // Create envelope definition
+    const envelopeDefinition = {
+      emailSubject: subject || 'Contract for Signature - AgentHub',
+      documents: [document],
+      recipients: {
+        signers: [signer]
+      },
+      status: 'created'
+    };
+
+    // Create envelope
+    const envelope = await envelopesApi.createEnvelope(DOCUSIGN_CONFIG.account_id, {
+      envelopeDefinition: envelopeDefinition
+    });
+
+    // Create sender view (embedded sending) for placing tabs and sending the envelope
+    const senderView = await envelopesApi.createSenderView(
+      DOCUSIGN_CONFIG.account_id,
+      envelope.envelopeId,
+      { returnUrlRequest }
+    );
+
+    // Save envelope info to database
+    try {
+      const { error: dbError } = await supabase
+        .from('docusign_envelopes')
+        .insert([
+          {
+            agent_id: userId,
+            envelope_id: envelope.envelopeId,
+            client_name: clientName,
+            client_email: clientEmail,
+            contract_content: contractContent,
+            status: 'created',
+            created_at: new Date().toISOString()
+          }
+        ]);
+
+      if (dbError) {
+        console.error('Error saving envelope to database:', dbError);
+        // Don't fail the request if database save fails
+      }
+    } catch (dbError) {
+      console.error('Database save failed (tables may not exist):', dbError.message);
+      // Continue with the response even if database save fails
+    }
+
+    res.json({
+      success: true,
+      data: {
+        envelopeId: envelope.envelopeId,
+        senderViewUrl: senderView.url,
+        status: envelope.status
+      }
+    });
+
+  } catch (error) {
+    console.error('Error creating DocuSign envelope:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to create DocuSign envelope',
+      details: error.message
+    });
+  }
+});
+
+// Get envelope status
+app.get('/api/docusign/envelope/:envelopeId', authenticateToken, async (req, res) => {
+  try {
+    const { envelopeId } = req.params;
+    const userId = req.user.userId;
+
+    // Create DocuSign client (using mock for testing)
+    let envelopesApi;
+    try {
+      const apiClient = await createDocuSignClient();
+      envelopesApi = new (require('docusign-esign').EnvelopesApi)(apiClient);
+    } catch (error) {
+      console.log('🔧 Using mock DocuSign service for testing...');
+      const mockClient = new MockDocuSignClient();
+      envelopesApi = mockClient.envelopesApi;
+    }
+
+    // Get envelope status
+    const envelope = await envelopesApi.getEnvelope(DOCUSIGN_CONFIG.account_id, envelopeId);
+
+    res.json({
+      success: true,
+      data: {
+        envelopeId: envelope.envelopeId,
+        status: envelope.status,
+        created: envelope.created,
+        lastModified: envelope.lastModified
+      }
+    });
+
+  } catch (error) {
+    console.error('Error getting envelope status:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get envelope status',
+      details: error.message
+    });
+  }
+});
+
+// Get user's DocuSign envelopes
+app.get('/api/docusign/envelopes', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+
+    // Get envelopes from database (optional - don't fail if tables don't exist)
+    try {
+      const { data, error } = await supabase
+        .from('docusign_envelopes')
+        .select('*')
+        .eq('agent_id', userId)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Supabase error:', error);
+        res.json({
+          success: true,
+          data: []
+        });
+        return;
+      }
+
+      res.json({
+        success: true,
+        data: data || []
+      });
+
+    } catch (dbError) {
+      console.error('Database query failed (tables may not exist):', dbError.message);
+      res.json({
+        success: true,
+        data: []
+      });
+    }
+
+  } catch (error) {
+    console.error('Error getting envelopes:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get envelopes',
+      details: error.message
+    });
+  }
+});
+
+// Mock DocuSign signing page
+app.get('/mock-docusign-signing', (req, res) => {
+  const { envelopeId, clientName, clientEmail } = req.query;
+  
+  const html = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DocuSign - Electronic Signature</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .signing-container {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            padding: 40px;
+            max-width: 600px;
+            width: 100%;
+            text-align: center;
+        }
+        .logo {
+            width: 120px;
+            height: 40px;
+            background: #0070c9;
+            border-radius: 6px;
+            margin: 0 auto 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+            font-size: 18px;
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 24px;
+        }
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 16px;
+        }
+        .document-preview {
+            background: #f8f9fa;
+            border: 2px dashed #dee2e6;
+            border-radius: 8px;
+            padding: 30px;
+            margin: 20px 0;
+            min-height: 200px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+        }
+        .document-icon {
+            font-size: 48px;
+            color: #6c757d;
+            margin-bottom: 15px;
+        }
+        .signature-area {
+            border: 2px solid #0070c9;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+            background: #f8f9ff;
+        }
+        .signature-input {
+            width: 100%;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 16px;
+            margin: 10px 0;
+        }
+        .btn {
+            background: #0070c9;
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 6px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            margin: 10px;
+            transition: background 0.3s;
+        }
+        .btn:hover {
+            background: #0056b3;
+        }
+        .btn-secondary {
+            background: #6c757d;
+        }
+        .btn-secondary:hover {
+            background: #545b62;
+        }
+        .info {
+            background: #e7f3ff;
+            border: 1px solid #b3d9ff;
+            border-radius: 6px;
+            padding: 15px;
+            margin: 20px 0;
+            color: #0056b3;
+        }
+        .status {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            border-radius: 6px;
+            padding: 15px;
+            margin: 20px 0;
+            color: #155724;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="signing-container">
+        <div class="logo">DocuSign</div>
+        <h1>Electronic Signature</h1>
+        <p class="subtitle">Please review and sign the document below</p>
+        
+        <div class="info">
+            <strong>Envelope ID:</strong> ${envelopeId}<br>
+            <strong>Client:</strong> ${clientName} (${clientEmail})
+        </div>
+        
+        <div class="document-preview">
+            <div class="document-icon">📄</div>
+            <h3>Contract Document</h3>
+            <p>This is a mock document for testing purposes.</p>
+            <p>The actual contract content would be displayed here.</p>
+        </div>
+        
+        <div class="signature-area">
+            <h3>📝 Signature Required</h3>
+            <input type="text" class="signature-input" id="signature" placeholder="Type your full name to sign" />
+            <input type="email" class="signature-input" id="email" placeholder="Confirm your email address" value="${clientEmail}" />
+        </div>
+        
+        <div>
+            <button class="btn" onclick="signDocument()">✅ Sign Document</button>
+            <button class="btn btn-secondary" onclick="declineDocument()">❌ Decline</button>
+        </div>
+        
+        <div class="status" id="status">
+            Document signed successfully! Redirecting...
+        </div>
+    </div>
+
+    <script>
+        function signDocument() {
+            const signature = document.getElementById('signature').value;
+            const email = document.getElementById('email').value;
+            
+            if (!signature || !email) {
+                alert('Please fill in both signature and email fields.');
+                return;
+            }
+            
+            document.getElementById('status').style.display = 'block';
+            document.querySelectorAll('.btn').forEach(btn => btn.disabled = true);
+            
+            // Simulate signing process
+            setTimeout(() => {
+                alert('Document signed successfully! This is a mock signing interface.');
+                // In a real implementation, this would redirect back to the main app
+                window.parent.postMessage({ type: 'DOCUSIGN_SIGNED', envelopeId: '${envelopeId}' }, '*');
+            }, 2000);
+        }
+        
+        function declineDocument() {
+            if (confirm('Are you sure you want to decline this document?')) {
+                alert('Document declined. This is a mock signing interface.');
+                window.parent.postMessage({ type: 'DOCUSIGN_DECLINED', envelopeId: '${envelopeId}' }, '*');
+            }
+        }
+    </script>
+</body>
+</html>`;
+  
+  res.send(html);
 });
 
 app.listen(PORT, () => {
