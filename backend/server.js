@@ -28,7 +28,15 @@ const PORT = process.env.PORT || 3001;
 
 // Middleware
 app.use(cors({
-  origin: ['http://localhost:3000', 'http://localhost:3004'],
+  origin: (origin, callback) => {
+    const allowed = ['http://localhost:3000', 'http://localhost:3004'];
+    // Allow requests from Chrome extensions and same-origin/undefined (like curl, Postman)
+    const isExtension = typeof origin === 'string' && origin.startsWith('chrome-extension://');
+    if (!origin || isExtension || allowed.includes(origin)) {
+      return callback(null, true);
+    }
+    return callback(new Error('Not allowed by CORS'));
+  },
   credentials: true
 }));
 app.use(express.json());
@@ -946,6 +954,30 @@ app.post('/api/client-notes', authenticateToken, async (req, res) => {
       error: 'Internal server error',
       details: error.message
     });
+  }
+});
+
+// Accept structured extract from extension and upload to Supabase Storage
+app.post('/api/extension/extract', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const payload = req.body;
+    if (!payload || !payload.fields || !Array.isArray(payload.fields)) {
+      return res.status(400).json({ success: false, error: 'Invalid payload' });
+    }
+    const path = `extracts/${userId}/${Date.now()}.json`;
+    const file = new Blob([JSON.stringify({ ...payload, userId, source: 'chrome-extension' }, null, 2)], { type: 'application/json' });
+    const { error } = await supabase.storage.from('agenthub-extracts').upload(path, file, {
+      contentType: 'application/json', upsert: false
+    });
+    if (error) {
+      console.error('Supabase upload error:', error);
+      return res.status(500).json({ success: false, error: error.message });
+    }
+    return res.json({ success: true, path });
+  } catch (e) {
+    console.error('Extension extract error:', e);
+    return res.status(500).json({ success: false, error: 'Internal server error' });
   }
 });
 

@@ -9,6 +9,8 @@ CREATE TABLE IF NOT EXISTS contract_amendments (
     original_contract TEXT NOT NULL,
     instruction TEXT NOT NULL,
     amended_contract TEXT NOT NULL,
+    jurisdiction TEXT,
+    document TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
@@ -20,6 +22,8 @@ CREATE TABLE IF NOT EXISTS amended_contracts (
     original_contract TEXT NOT NULL,
     amended_contract TEXT NOT NULL,
     instruction TEXT NOT NULL,
+    jurisdiction TEXT,
+    document TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 

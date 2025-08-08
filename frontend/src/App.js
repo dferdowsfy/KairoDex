@@ -2,6 +2,16 @@ import { useState, useEffect, useRef } from 'react';
 import Login from './components/Login';
 import Register from './components/Register';
 import PasswordChange from './components/PasswordChange';
+import BlockchainInfo from './components/BlockchainInfo';
+import DocuSignConsent from './components/DocuSignConsent';
+import AnimatedContractFlow from './components/AnimatedContractFlow';
+import AgentDashboard from './components/AgentDashboard';
+import ContractsPage from './components/ContractsPage';
+import BlockchainTracker from './components/BlockchainTracker';
+import ThemeSettings from './components/ThemeSettings';
+import { generateJurisdictions } from './statesData';
+import { logToBlockchain } from './utils/blockchain';
+import { getSupabaseClient, supaGetSession, supaSignInWithPassword, supaListUserExtracts, supaDownloadJson } from './utils/supabase';
 
 export default function App() {
   // Authentication state
@@ -11,7 +21,7 @@ export default function App() {
   const [token, setToken] = useState(null);
 
   // Tab management
-  const [activeTab, setActiveTab] = useState('dashboard'); // 'dashboard', 'history', 'settings'
+  const [activeTab, setActiveTab] = useState('dashboard'); // 'dashboard', 'clients', 'contracts', 'ledger', 'settings'
 
   // App states
   const [loading, setLoading] = useState(false);
@@ -20,12 +30,18 @@ export default function App() {
   const [savedNote, setSavedNote] = useState(null);
   const [generatedFollowUp, setGeneratedFollowUp] = useState(null);
   const [communicationHistory, setCommunicationHistory] = useState([]);
+  const [contractHistory, setContractHistory] = useState([]);
+  const [recentActivity, setRecentActivity] = useState([]);
   const [showHistory, setShowHistory] = useState(false);
   const [expandedHistoryItems, setExpandedHistoryItems] = useState(new Set());
   const [clientId, setClientId] = useState('client1');
   const [scheduledTime, setScheduledTime] = useState('');
   const [copied, setCopied] = useState(false);
   const [showPasswordChange, setShowPasswordChange] = useState(false);
+  
+  // Card-based interface states
+  const [selectedPathway, setSelectedPathway] = useState(null);
+  const [showPathwayInterface, setShowPathwayInterface] = useState(false);
   
   // Email integration states
   const [emailProvider, setEmailProvider] = useState('gmail');
@@ -34,13 +50,26 @@ export default function App() {
   
   // User settings states
   const [customColors, setCustomColors] = useState({
-    background: '#0B1F33',
-    cardBackground: 'rgba(255, 255, 255, 0.1)',
-    cardBorder: 'rgba(255, 255, 255, 0.2)',
-    primaryButton: '#1E85F2',
-    secondaryButton: '#10B981',
-    textPrimary: '#F8EEDB',
-    textSecondary: '#9CA3AF'
+    // Dark, refined base matching the reference
+    appBackground: 'radial-gradient(1200px 600px at 10% -10%, #0B1220 0%, #0A0F1A 45%, #0A0E17 100%)',
+    background: '#0A0F1A',
+    cardBackground: 'rgba(255, 255, 255, 0.04)',
+    cardBorder: 'rgba(255, 255, 255, 0.08)',
+    primaryButton: '#2563EB',
+    secondaryButton: '#059669',
+    textPrimary: '#E2E8F0',
+    textSecondary: '#94A3B8',
+    // Dark banner with light text (header-specific)
+    headerBackground: 'linear-gradient(90deg, #0B1220 0%, #141E2E 50%, #0B1220 100%)',
+    headerText: '#E5E7EB',
+    headerBorder: 'rgba(255, 255, 255, 0.12)',
+    // Dashboard card gradients (dark)
+    gradientCardBlue: 'linear-gradient(135deg, #0F1F3A 0%, #0B2B5A 100%)',
+    gradientCardGreen: 'linear-gradient(135deg, #0B2E2A 0%, #064E3B 100%)',
+    gradientCardIndigo: 'linear-gradient(135deg, #1F1744 0%, #3B2A7C 100%)',
+    gradientCardPurple: 'linear-gradient(135deg, #1F1744 0%, #3B2A7C 100%)',
+    gradientCardYellow: 'linear-gradient(135deg, #3A2A0F 0%, #6B4E0B 100%)',
+    gradientCardGray: 'linear-gradient(135deg, #0F172A 0%, #0B1220 100%)'
   });
 
   const [textSizes, setTextSizes] = useState({
@@ -61,13 +90,39 @@ export default function App() {
   const [uploadingFile, setUploadingFile] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const [fileUploaded, setFileUploaded] = useState(false);
+  const [clientNotesFile, setClientNotesFile] = useState(null);
+  const [clientNotesContent, setClientNotesContent] = useState('');
   const fileInputRef = useRef(null);
+  
+  // Voice notes (speech-to-text) for follow-up generation
+  const [isRecording, setIsRecording] = useState(false);
+  const recognitionRef = useRef(null);
+
+  // Supabase (import from extension) states
+  const [supaSession, setSupaSession] = useState(null);
+  const [supaEmail, setSupaEmail] = useState('');
+  const [supaPassword, setSupaPassword] = useState('');
+  const [supaLoading, setSupaLoading] = useState(false);
+  const [supaNotes, setSupaNotes] = useState([]);
 
   // Contract amendment states
   const [isContractAmendment, setIsContractAmendment] = useState(false);
   const [amendmentInstruction, setAmendmentInstruction] = useState('');
   const [amendedContract, setAmendedContract] = useState(null);
   const [processingAmendment, setProcessingAmendment] = useState(false);
+  const [selectedJurisdiction, setSelectedJurisdiction] = useState('');
+  const [contractDocument, setContractDocument] = useState('');
+  const [contractStep, setContractStep] = useState(1); // 1: jurisdiction, 2: document, 3: modification
+  
+  // DocuSign integration states
+  const [showDocuSignForm, setShowDocuSignForm] = useState(false);
+  const [showDocuSignConsent, setShowDocuSignConsent] = useState(false);
+  const [clientName, setClientName] = useState('');
+  const [clientEmail, setClientEmail] = useState('');
+  const [docuSignUrl, setDocuSignUrl] = useState('');
+  const [showDocuSignFrame, setShowDocuSignFrame] = useState(false);
+  const [processingDocuSign, setProcessingDocuSign] = useState(false);
+  const [envelopeId, setEnvelopeId] = useState('');
 
   // Sample clients for dropdown
   const clients = [
@@ -77,6 +132,10 @@ export default function App() {
     { id: 'client4', name: 'David Thompson' },
     { id: 'client5', name: 'Lisa Wang' }
   ];
+
+  // All US States and Territories with contract documents
+  const jurisdictions = generateJurisdictions();
+        
 
   // Check authentication on app load
   useEffect(() => {
@@ -91,6 +150,79 @@ export default function App() {
     }
   }, []);
 
+  // Load contract history when switching to history tab
+  useEffect(() => {
+    if (activeTab === 'history' && token) {
+      loadContractHistory();
+    }
+  }, [activeTab, token]);
+
+  // Load recent activity when on dashboard
+  useEffect(() => {
+    if (activeTab === 'dashboard' && token) {
+      loadRecentActivity();
+    }
+  }, [activeTab, token]);
+
+  // Debug DocuSign form state
+  useEffect(() => {
+    console.log('DocuSign form state changed:', { showDocuSignForm, showDocuSignConsent });
+  }, [showDocuSignForm, showDocuSignConsent]);
+
+  const loadContractHistory = async () => {
+    try {
+      const response = await fetch(`http://localhost:3001/api/contract-history?clientId=${clientId}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        if (result.success && result.data) {
+          // Transform the data to match our frontend format
+          const transformedContracts = result.data.map(contract => ({
+            id: contract.id,
+            clientId: contract.client_id,
+            originalContract: contract.original_contract,
+            amendedContract: contract.amended_contract,
+            amendmentInstruction: contract.instruction,
+            jurisdiction: contract.jurisdiction,
+            document: contract.document,
+            date: contract.created_at,
+            type: 'contract'
+          }));
+          setContractHistory(transformedContracts);
+        }
+      } else {
+        console.error('Failed to load contract history');
+      }
+    } catch (error) {
+      console.error('Error loading contract history:', error);
+    }
+  };
+
+  const loadRecentActivity = async () => {
+    try {
+      const response = await fetch('http://localhost:3001/api/auth/activity', {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        if (result.success && result.data) {
+          setRecentActivity(result.data.activities || []);
+        }
+      } else {
+        console.error('Failed to load recent activity');
+      }
+    } catch (error) {
+      console.error('Error loading recent activity:', error);
+    }
+  };
+
   // Load user settings from backend
   const loadUserSettings = async () => {
     try {
@@ -98,604 +230,624 @@ export default function App() {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
-        }
+        },
       });
 
-      const data = await response.json();
-      
-      if (data.success) {
-        setCustomColors(data.data.theme_colors);
-        setTextSizes(data.data.text_sizes);
-        setUserPreferences(data.data.preferences);
+      if (response.ok) {
+        const settings = await response.json();
+        if (settings.customColors) setCustomColors(settings.customColors);
+        if (settings.textSizes) setTextSizes(settings.textSizes);
+        if (settings.userPreferences) setUserPreferences(settings.userPreferences);
       }
     } catch (error) {
-      console.error('Error loading user settings:', error);
+      console.error('Error loading settings:', error);
     }
   };
 
   // Save user settings to backend
   const saveUserSettings = async () => {
-    setIsSavingSettings(true);
     try {
+      setIsSavingSettings(true);
       const response = await fetch('http://localhost:3001/api/auth/settings', {
-        method: 'PUT',
+        method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          theme_colors: customColors,
-          text_sizes: textSizes,
-          preferences: userPreferences
-        })
+          customColors,
+          textSizes,
+          userPreferences,
+        }),
       });
 
-      const data = await response.json();
-      
-      if (data.success) {
-        console.log('Settings saved successfully');
+      if (response.ok) {
         return { success: true };
       } else {
-        console.error('Failed to save settings:', data.error);
-        return { success: false, error: data.error };
+        const error = await response.json();
+        return { success: false, error: error.message };
       }
     } catch (error) {
-      console.error('Error saving user settings:', error);
+      console.error('Error saving settings:', error);
       return { success: false, error: error.message };
     } finally {
       setIsSavingSettings(false);
     }
   };
 
-  // Manual save settings function
+  // Manual save function for settings
   const handleManualSave = async () => {
     const result = await saveUserSettings();
     if (result.success) {
-      alert('✅ Settings saved successfully!');
+      console.log('Settings saved successfully');
     } else {
-      alert(`❌ Failed to save settings: ${result.error}`);
+      console.error('Failed to save settings:', result.error);
     }
   };
 
-  // Handle login
+  // Authentication handlers
   const handleLogin = (data) => {
     setToken(data.token);
     setUser(data.user);
     setIsAuthenticated(true);
+    localStorage.setItem('token', data.token);
+    localStorage.setItem('user', JSON.stringify(data.user));
     loadUserSettings();
   };
 
-  // Handle registration
   const handleRegister = (data) => {
     setToken(data.token);
     setUser(data.user);
     setIsAuthenticated(true);
-    loadUserSettings();
+    localStorage.setItem('token', data.token);
+    localStorage.setItem('user', JSON.stringify(data.user));
   };
 
-  // Handle logout
   const handleLogout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
     setToken(null);
     setUser(null);
     setIsAuthenticated(false);
-    setShowLogin(true);
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
   };
 
-  // Switch between login and register
   const switchToRegister = () => setShowLogin(false);
   const switchToLogin = () => setShowLogin(true);
 
-  // Sample communication history
-  const sampleHistory = [
-    {
-      id: 1,
-      subject: 'Follow-up on Fremont property viewing',
-      date: '2024-01-15T09:00:00',
-      tone: 'Friendly',
-      preview: 'Hi Sarah! I hope you had a great time viewing the Fremont property yesterday...',
-      fullMessage: 'Hi Sarah! I hope you had a great time viewing the Fremont property yesterday. I wanted to follow up and see if you had any questions about the home or the neighborhood. The schools in that area are excellent, and the commute to downtown is only 25 minutes. Let me know if you\'d like to schedule another viewing or if you have any other properties in mind!'
-    },
-    {
-      id: 2,
-      subject: 'Market update for your area',
-      date: '2024-01-10T14:30:00',
-      tone: 'Professional',
-      preview: 'Hi Sarah, I wanted to share some exciting market insights for your target area...',
-      fullMessage: 'Hi Sarah, I wanted to share some exciting market insights for your target area. Home values in Fremont have increased by 8% over the last quarter, and inventory is starting to pick up. This could be a great time to make a move. I\'ve identified three new listings that match your criteria perfectly. Would you like me to schedule viewings for any of these properties?'
-    }
-  ];
+  // Pathway selection functions
+  const handlePathwaySelect = (pathway) => {
+    console.log('handlePathwaySelect called with pathway:', pathway);
+    console.log('Setting selectedPathway to:', pathway);
+    console.log('Setting showPathwayInterface to: true');
+    setSelectedPathway(pathway);
+    setShowPathwayInterface(true);
+    console.log('Pathway selection complete');
+  };
 
-  useEffect(() => {
-    if (isAuthenticated) {
-      setCommunicationHistory(sampleHistory);
-      // Set default scheduled time to next morning 9:00 AM
-      const tomorrow = new Date();
-      tomorrow.setDate(tomorrow.getDate() + 1);
-      tomorrow.setHours(9, 0, 0, 0);
-      setScheduledTime(tomorrow.toISOString().slice(0, 16));
-    }
-  }, [isAuthenticated]);
+  const handleDashboardClick = () => {
+    setActiveTab('dashboard');
+    setSelectedPathway(null);
+    setShowPathwayInterface(false);
+    setNewNote('');
+    setSavedNote(null);
+    setGeneratedFollowUp(null);
+    setIsContractAmendment(false);
+    setAmendmentInstruction('');
+    setAmendedContract(null);
+    setProcessingAmendment(false);
+    setFileUploaded(false);
+    setSelectedJurisdiction('');
+    setContractDocument('');
+    setContractStep(1);
+    setClientNotesFile(null);
+    setClientNotesContent('');
+    loadRecentActivity();
+  };
 
-  // Load user settings when authenticated
-  useEffect(() => {
-    if (isAuthenticated && token) {
-      loadUserSettings();
-    }
-  }, [isAuthenticated, token]);
+  const handleBackToCards = () => {
+    setSelectedPathway(null);
+    setShowPathwayInterface(false);
+    // Reset all pathway-specific states
+    setNewNote('');
+    setSavedNote(null);
+    setGeneratedFollowUp(null);
+    setIsContractAmendment(false);
+    setAmendmentInstruction('');
+    setAmendedContract(null);
+    setProcessingAmendment(false);
+    setFileUploaded(false);
+    setSelectedJurisdiction('');
+    setContractDocument('');
+    setContractStep(1);
+    setClientNotesFile(null);
+    setClientNotesContent('');
+  };
 
-  // Load sample history data when history tab is first accessed
-  useEffect(() => {
-    if (activeTab === 'history' && communicationHistory.length === 0) {
-      // Add some sample history data
-      const sampleHistory = [
-        {
-          id: 1,
-          subject: "Follow-up: Property Viewing Schedule",
-          date: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(), // 2 days ago
-          tone: "Professional",
-          preview: "Hi Sarah, I hope you're doing well. I wanted to follow up on our conversation about the property viewing schedule...",
-          fullMessage: "Hi Sarah,\n\nI hope you're doing well. I wanted to follow up on our conversation about the property viewing schedule for next week. I've identified several properties that match your criteria for a 3-bedroom home in the downtown area.\n\nWould you be available for viewings on Tuesday or Thursday afternoon? I can arrange for us to see 3-4 properties that fit your budget and requirements.\n\nLooking forward to hearing from you!\n\nBest regards,\nDarius"
-        },
-        {
-          id: 2,
-          subject: "Market Update: New Listings in Your Area",
-          date: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(), // 5 days ago
-          tone: "Informative",
-          preview: "Good morning! I wanted to share some exciting new listings that have come on the market in your preferred neighborhood...",
-          fullMessage: "Good morning!\n\nI wanted to share some exciting new listings that have come on the market in your preferred neighborhood. There are currently 3 new properties that match your criteria, including one that just listed yesterday with a great price point.\n\nI've attached the details for your review. Let me know if you'd like to schedule a viewing for any of these properties.\n\nBest regards,\nDarius"
-        },
-        {
-          id: 3,
-          subject: "Thank You: Open House Visit",
-          date: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(), // 1 week ago
-          tone: "Friendly",
-          preview: "Thank you for attending our open house yesterday! It was great to meet you and discuss your home buying goals...",
-          fullMessage: "Thank you for attending our open house yesterday! It was great to meet you and discuss your home buying goals.\n\nI appreciated learning more about your timeline and preferences. Based on our conversation, I think I have a good understanding of what you're looking for in your next home.\n\nI'll be in touch soon with some personalized recommendations that match your criteria.\n\nBest regards,\nDarius"
-        }
-      ];
-      setCommunicationHistory(sampleHistory);
+  // Voice capture helpers
+  const startVoiceCapture = () => {
+    try {
+      const SpeechRecognition =
+        window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SpeechRecognition) {
+        alert('Voice capture is not supported in this browser.');
+        return;
+      }
+      const recognition = new SpeechRecognition();
+      recognition.lang = 'en-US';
+      recognition.interimResults = true;
+      recognition.continuous = true;
+      recognition.onresult = (event) => {
+        const transcript = Array.from(event.results)
+          .map((r) => r[0].transcript)
+          .join(' ');
+        setClientNotesContent(transcript);
+        if (transcript && transcript.length > 10) setFileUploaded(true);
+      };
+      recognition.onend = () => setIsRecording(false);
+      recognition.onerror = () => setIsRecording(false);
+      recognition.start();
+      recognitionRef.current = recognition;
+      setIsRecording(true);
+    } catch (err) {
+      console.error('Voice capture failed:', err);
+      setIsRecording(false);
     }
-  }, [activeTab, communicationHistory.length]);
+  };
 
+  const stopVoiceCapture = () => {
+    try {
+      recognitionRef.current?.stop();
+    } catch (e) {}
+    setIsRecording(false);
+  };
+
+  const handleActivityClick = (activity) => {
+    // Handle different types of activity clicks
+    if (activity.type === 'note') {
+      // Show note details
+      setSavedNote({
+        id: activity.id,
+        content: activity.content,
+        clientId: activity.client_id
+      });
+      setClientId(activity.client_id);
+      setActiveTab('dashboard');
+      handlePathwaySelect('followup');
+    } else if (activity.type === 'message') {
+      // Show message details
+      setGeneratedFollowUp(activity.message);
+      setClientId(activity.client_id);
+      setActiveTab('dashboard');
+      handlePathwaySelect('followup');
+    }
+  };
+
+  const formatTimeAgo = (dateString) => {
+    const now = new Date();
+    const date = new Date(dateString);
+    const diffInSeconds = Math.floor((now - date) / 1000);
+    
+    if (diffInSeconds < 60) return 'just now';
+    if (diffInSeconds < 3600) return `${Math.floor(diffInSeconds / 60)} minutes ago`;
+    if (diffInSeconds < 86400) return `${Math.floor(diffInSeconds / 3600)} hours ago`;
+    if (diffInSeconds < 2592000) return `${Math.floor(diffInSeconds / 86400)} days ago`;
+    return `${Math.floor(diffInSeconds / 2592000)} months ago`;
+  };
+
+  // Placeholder functions for the pathways
   const handleSaveNote = async (e) => {
     e.preventDefault();
-    if (!newNote.trim()) return;
-
-    // If contract amendment toggle is on, process amendment instead of saving note
-    if (isContractAmendment) {
-      await handleContractAmendment();
-      return;
-    }
-
+    setLoading(true);
+    
     try {
       const response = await fetch('http://localhost:3001/api/client-notes', {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify({
-          clientId: clientId,
-          note: newNote
+          clientId,
+          note: newNote,
+          isContractAmendment: selectedPathway === 'contract'
         })
       });
-      
-      const data = await response.json();
-      
-      if (data.success) {
-        // Simulate tone inference (backend should provide this)
-        const tones = ['Empathetic', 'Professional', 'Friendly', 'Enthusiastic', 'Supportive'];
-        const randomTone = tones[Math.floor(Math.random() * tones.length)];
-        
-        const noteData = {
-          id: Date.now(),
-          content: newNote,
-          tone: randomTone,
-          timestamp: new Date().toISOString()
-        };
 
-        setSavedNote(noteData);
+      if (response.ok) {
+        const result = await response.json();
+        
+        // Log to blockchain
+        const activityText = `Note created for client ${clientId}: ${newNote.substring(0, 100)}...`;
+        const blockchainResult = await logToBlockchain(activityText, 'note_creation');
+        
+        // Add blockchain info to the saved note
+        const noteWithBlockchain = {
+          ...result,
+          blockchainTx: blockchainResult.success ? blockchainResult.txHash : null,
+          blockchainTimestamp: blockchainResult.timestamp
+        };
+        
+        setSavedNote(noteWithBlockchain);
         setNewNote('');
-        resetContractAmendment();
+        setFileUploaded(false);
+        
+        if (selectedPathway === 'contract') {
+          // For contract amendments, process the amendment
+          await handleContractAmendment();
+        }
       } else {
-        alert('Error saving note: ' + (data.error || 'Unknown error'));
+        console.error('Failed to save note');
       }
     } catch (error) {
       console.error('Error saving note:', error);
-      alert('Error connecting to backend. Please check if the server is running.');
+    } finally {
+      setLoading(false);
     }
   };
 
   const handleContractAmendment = async () => {
-    if (!newNote.trim() || !amendmentInstruction.trim()) {
-      alert('Please provide both the contract content and amendment instructions.');
-      return;
-    }
-
+    if (!contractDocument || !amendmentInstruction.trim()) return;
+    
     setProcessingAmendment(true);
     
     try {
       const response = await fetch('http://localhost:3001/api/contract-amendment', {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify({
-          contract: newNote,
-          instruction: amendmentInstruction,
-          clientId: clientId
+          contractContent: contractDocument,
+          amendmentInstruction,
+          jurisdiction: selectedJurisdiction,
+          clientId
         })
       });
-      
-      const data = await response.json();
-      
-      if (data.success) {
-        setAmendedContract(data.data.amendedContract);
-        setCurrentStep(2);
+
+      if (response.ok) {
+        const result = await response.json();
+        setAmendedContract(result.amendedContract);
       } else {
-        alert('Error processing contract amendment: ' + (data.error || 'Unknown error'));
+        console.error('Failed to process contract amendment');
       }
     } catch (error) {
       console.error('Error processing contract amendment:', error);
-      alert('Error connecting to backend. Please check if the server is running.');
     } finally {
       setProcessingAmendment(false);
     }
   };
 
   const handleSaveAmendedContract = async () => {
-    if (!amendedContract) return;
-
+    console.log('Save button clicked!', { amendedContract: !!amendedContract });
+    if (!amendedContract) {
+      console.log('No amended contract to save');
+      return;
+    }
+    
     try {
+      // Use the contractDocument as the original contract content
+      const originalContractContent = contractDocument || clientNotesContent || (savedNote ? savedNote.content : '') || '';
+      console.log('Saving contract with data:', {
+        clientId,
+        hasOriginalContract: !!originalContractContent,
+        hasAmendedContract: !!amendedContract,
+        jurisdiction: selectedJurisdiction,
+        document: contractDocument
+      });
+      
       const response = await fetch('http://localhost:3001/api/save-amended-contract', {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify({
-          clientId: clientId,
-          originalContract: newNote,
-          amendedContract: amendedContract,
-          instruction: amendmentInstruction
+          clientId,
+          originalContract: originalContractContent,
+          amendedContract,
+          instruction: amendmentInstruction,
+          jurisdiction: selectedJurisdiction,
+          document: contractDocument
         })
       });
-      
-      const data = await response.json();
-      
-      if (data.success) {
-        alert('✅ Amended contract saved successfully!');
-        // Reset states
-        setNewNote('');
-        setAmendmentInstruction('');
-        setIsContractAmendment(false);
-        setAmendedContract(null);
-        setSavedNote(null);
-        setCurrentStep(1);
+
+      if (response.ok) {
+        const result = await response.json();
+        console.log('Amended contract saved successfully', result);
+        
+        // Log to blockchain
+        const activityText = `Contract modification for client ${clientId}: ${amendmentInstruction}`;
+        const blockchainResult = await logToBlockchain(activityText, 'contract_modification');
+        
+        // Add to contract history with blockchain info
+        const newContract = {
+          id: Date.now(),
+          clientId,
+          originalContract: originalContractContent,
+          amendedContract,
+          amendmentInstruction,
+          jurisdiction: selectedJurisdiction,
+          document: contractDocument,
+          date: new Date().toISOString(),
+          type: 'contract',
+          blockchainTx: blockchainResult.success ? blockchainResult.txHash : null,
+          blockchainTimestamp: blockchainResult.timestamp
+        };
+        
+        setContractHistory(prev => [newContract, ...prev]);
+        
+        // Show DocuSign form after saving
+        console.log('Showing DocuSign form...');
+        setShowDocuSignForm(true);
+        
+        // Pre-fill client name from the selected client
+        const selectedClient = clients.find(c => c.id === clientId);
+        if (selectedClient) {
+          setClientName(selectedClient.name);
+          console.log('Pre-filled client name:', selectedClient.name);
+        }
       } else {
-        alert('Error saving amended contract: ' + (data.error || 'Unknown error'));
+        const errorData = await response.json().catch(() => ({}));
+        console.error('Failed to save amended contract', response.status, errorData);
+        alert(`Failed to save contract: ${errorData.error || 'Unknown error'}`);
       }
     } catch (error) {
       console.error('Error saving amended contract:', error);
-      alert('Error connecting to backend. Please check if the server is running.');
     }
   };
 
+  const handleCreateDocuSignEnvelope = async () => {
+    if (!amendedContract || !clientName || !clientEmail) {
+      alert('Please provide client name and email');
+      return;
+    }
+
+    setProcessingDocuSign(true);
+
+    try {
+      const response = await fetch('http://localhost:3001/api/docusign/create-envelope', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          contractContent: amendedContract,
+          clientName,
+          clientEmail,
+          subject: `Contract for Signature - ${clientName}`
+        })
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        console.log('DocuSign envelope created (sender view):', result);
+        
+        setDocuSignUrl(result.data.senderViewUrl);
+        setEnvelopeId(result.data.envelopeId);
+        setShowDocuSignFrame(true);
+        setShowDocuSignForm(false);
+        
+        // Log to blockchain
+        const activityText = `DocuSign envelope created for ${clientName} (${clientEmail})`;
+        await logToBlockchain(activityText, 'docusign_envelope_created');
+        
+      } else {
+        const errorData = await response.json().catch(() => ({}));
+        console.error('Failed to create DocuSign envelope', response.status, errorData);
+        
+        if (errorData.error === 'consent_required') {
+          // Show consent form instead of alert
+          setShowDocuSignConsent(true);
+        } else {
+          alert(`Failed to create DocuSign envelope: ${errorData.error || 'Unknown error'}`);
+        }
+      }
+    } catch (error) {
+      console.error('Error creating DocuSign envelope:', error);
+      alert('Error creating DocuSign envelope. Please try again.');
+    } finally {
+      setProcessingDocuSign(false);
+    }
+  };
+
+  const handleCloseDocuSignFrame = () => {
+    setShowDocuSignFrame(false);
+    setDocuSignUrl('');
+    setEnvelopeId('');
+    setClientName('');
+    setClientEmail('');
+    setShowDocuSignForm(false);
+    
+    // Reset contract states
+    setAmendedContract(null);
+    setAmendmentInstruction('');
+    setSavedNote(null);
+    setContractStep(1);
+    setSelectedJurisdiction('');
+    setContractDocument('');
+    setIsContractAmendment(false);
+  };
+
+  const handleDocuSignConsentGranted = () => {
+    setShowDocuSignConsent(false);
+    // Retry creating the envelope
+    handleCreateDocuSignEnvelope();
+  };
+
   const handleGenerateFollowUp = async () => {
-    if (!savedNote) {
-      alert('Please save a note first before generating a follow-up.');
+    console.log('Generate follow-up clicked!', { 
+      hasClientNotes: !!clientNotesContent,
+      clientNotesLength: clientNotesContent?.length 
+    });
+    
+    if (!clientNotesContent) {
+      console.log('No client notes content to generate follow-up from');
       return;
     }
     
     setLoading(true);
     
     try {
+      console.log('Sending request to generate follow-up...');
       const response = await fetch('http://localhost:3001/api/generate-followup', {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify({
-          clientId: clientId,
-          note: savedNote.content,
-          noteTone: savedNote.tone
+          clientId,
+          agentId: user.id,
+          noteContent: clientNotesContent
         })
       });
-      
-      const data = await response.json();
-      
-      if (data.success) {
-        const followUp = {
-          subject: data.data.subject || `Follow-up: ${savedNote.content.split(' ').slice(0, 5).join(' ')}...`,
-          body: data.data.message || data.data.body,
-          tone: data.data.tone || savedNote.tone,
-          timestamp: new Date().toISOString()
-        };
+
+      if (response.ok) {
+        const result = await response.json();
+        console.log('Follow-up generation response:', result);
         
-        setGeneratedFollowUp(followUp);
-        setCurrentStep(2);
+        if (result.success && result.data) {
+          // Log to blockchain
+          const activityText = `Follow-up message generated for client ${clientId}: ${result.data.message.substring(0, 100)}...`;
+          const blockchainResult = await logToBlockchain(activityText, 'message_generation');
+          
+          // Transform the API response to match our frontend format
+          const followUp = {
+            subject: `Follow-up: ${clientId}`,
+            body: result.data.message,
+            tone: 'Professional',
+            date: new Date().toISOString(),
+            blockchainTx: blockchainResult.success ? blockchainResult.txHash : null,
+            blockchainTimestamp: blockchainResult.timestamp
+          };
+          console.log('Setting generated follow-up:', followUp);
+          setGeneratedFollowUp(followUp);
+        } else {
+          console.error('Failed to generate follow-up: Invalid response format', result);
+        }
       } else {
-        alert('Error generating follow-up: ' + (data.error || 'Unknown error'));
+        console.error('Failed to generate follow-up', response.status, response.statusText);
       }
     } catch (error) {
       console.error('Error generating follow-up:', error);
-      alert('Error connecting to backend. Please check if the server is running.');
     } finally {
       setLoading(false);
     }
   };
 
   const handleSendNow = async () => {
-    // Add to communication history
-    const newHistoryItem = {
-      id: Date.now(),
-      subject: generatedFollowUp.subject,
-      date: new Date().toISOString(),
-      tone: generatedFollowUp.tone,
-      preview: generatedFollowUp.body.split('\n\n')[0],
-      fullMessage: generatedFollowUp.body
-    };
-    
-    setCommunicationHistory([newHistoryItem, ...communicationHistory]);
-    
-    // If Gmail is connected, send the email
-    if (emailConnected && emailProvider === 'gmail') {
-      try {
-        const response = await fetch('http://localhost:3001/api/gmail/send', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            email: emailAddress,
-            to: clients.find(c => c.id === clientId)?.name || 'Client',
-            subject: generatedFollowUp.subject,
-            body: generatedFollowUp.body
-          })
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-          alert('Follow-up sent successfully via Gmail!');
-        } else {
-          alert('Failed to send email: ' + (data.error || 'Unknown error'));
-        }
-      } catch (error) {
-        console.error('Error sending email:', error);
-        alert('Error sending email. Please check your Gmail connection.');
-      }
-    } else {
-      // Show success message for history addition only
-      alert('Follow-up added to history. Connect Gmail to send emails automatically.');
-    }
-    
-    setGeneratedFollowUp(null);
-    setSavedNote(null);
-    setCurrentStep(1);
-  };
-
-  const handleSchedule = async () => {
-    // Add to communication history with scheduled time
-    const newHistoryItem = {
-      id: Date.now(),
-      subject: generatedFollowUp.subject,
-      date: scheduledTime,
-      tone: generatedFollowUp.tone,
-      preview: generatedFollowUp.body.split('\n\n')[0],
-      fullMessage: generatedFollowUp.body,
-      scheduled: true
-    };
-    
-    setCommunicationHistory([newHistoryItem, ...communicationHistory]);
-    setGeneratedFollowUp(null);
-    setSavedNote(null);
-    setCurrentStep(1);
-    
-    // Show success message
-    alert(`Follow-up scheduled for ${new Date(scheduledTime).toLocaleString()}`);
-  };
-
-  const handleCopyMessage = async () => {
     if (!generatedFollowUp) return;
     
     try {
-      await navigator.clipboard.writeText(generatedFollowUp.body);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch (err) {
-      const textArea = document.createElement('textarea');
-      textArea.value = generatedFollowUp.body;
-      document.body.appendChild(textArea);
-      textArea.select();
-      document.execCommand('copy');
-      document.body.removeChild(textArea);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    }
-  };
-
-  const toggleHistoryItem = (itemId) => {
-    const newExpanded = new Set(expandedHistoryItems);
-    if (newExpanded.has(itemId)) {
-      newExpanded.delete(itemId);
-    } else {
-      newExpanded.add(itemId);
-    }
-    setExpandedHistoryItems(newExpanded);
-  };
-
-  const handleEmailConnection = async () => {
-    try {
-      if (emailProvider === 'gmail') {
-        // Get OAuth URL from backend
-        const response = await fetch('http://localhost:3001/api/auth/gmail', {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-          }
-        });
-        const data = await response.json();
-        
-        if (data.success) {
-          // Open OAuth popup
-          const popup = window.open(
-            data.authUrl,
-            'gmail_oauth',
-            'width=500,height=600,scrollbars=yes,resizable=yes'
-          );
-          
-          // Check for OAuth completion
-          const checkPopup = setInterval(() => {
-            if (popup.closed) {
-              clearInterval(checkPopup);
-              // Check if user is connected
-              checkGmailConnection();
-            }
-          }, 1000);
-        } else {
-          alert('Failed to initiate Gmail authentication');
-        }
-      } else {
-        // For Outlook, show placeholder
-        alert('Outlook integration coming soon!');
-      }
-    } catch (error) {
-      console.error('Email connection error:', error);
-      alert('Error connecting to email provider');
-    }
-  };
-
-  const checkGmailConnection = async () => {
-    try {
-      const response = await fetch(`http://localhost:3001/api/auth/gmail/status?email=${emailAddress || 'check'}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        }
-      });
-      const data = await response.json();
-      
-      if (data.success && data.connected) {
-        setEmailConnected(true);
-        setEmailAddress(data.email);
-      }
-    } catch (error) {
-      console.error('Error checking Gmail connection:', error);
-    }
-  };
-
-  const disconnectGmail = async () => {
-    try {
-      const response = await fetch('http://localhost:3001/api/auth/gmail/disconnect', {
+      const response = await fetch('http://localhost:3001/api/gmail/send', {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify({
-          email: emailAddress
+          clientId,
+          subject: generatedFollowUp.subject,
+          body: generatedFollowUp.body,
+          scheduledTime: null // Send immediately
         })
       });
-      
-      const data = await response.json();
-      
-      if (data.success) {
-        setEmailConnected(false);
-        setEmailAddress('');
-        alert('Gmail disconnected successfully');
+
+      if (response.ok) {
+        console.log('Message sent successfully');
+        // Add to communication history
+        setCommunicationHistory(prev => [{
+          id: Date.now(),
+          subject: generatedFollowUp.subject,
+          body: generatedFollowUp.body,
+          tone: generatedFollowUp.tone,
+          date: new Date().toISOString(),
+          scheduled: false
+        }, ...prev]);
+        
+        // Reset states
+        setGeneratedFollowUp(null);
+        setSavedNote(null);
+      } else {
+        console.error('Failed to send message');
       }
     } catch (error) {
-      console.error('Error disconnecting Gmail:', error);
-      alert('Error disconnecting Gmail');
+      console.error('Error sending message:', error);
     }
   };
 
-  // Check for OAuth callback on component mount
-  useEffect(() => {
-    const urlParams = new URLSearchParams(window.location.search);
-    const gmailConnected = urlParams.get('gmail_connected');
-    const email = urlParams.get('email');
-    const error = urlParams.get('error');
+  const handleCopyMessage = async () => {
+    if (!generatedFollowUp && !amendedContract) return;
     
-    if (gmailConnected === 'true' && email) {
-      setEmailConnected(true);
-      setEmailAddress(email);
-      // Clean up URL
-      window.history.replaceState({}, document.title, window.location.pathname);
-    } else if (error) {
-      alert(`Gmail connection failed: ${error}`);
-      // Clean up URL
-      window.history.replaceState({}, document.title, window.location.pathname);
-    }
-  }, []);
-
-  // File upload handlers
-  const handleFileUpload = async (file) => {
-    if (!file) return;
-
-    const allowedTypes = [
-      'text/plain',
-      'application/pdf',
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      'application/msword',
-      'text/csv',
-      'application/vnd.ms-excel',
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-    ];
-
-    if (!allowedTypes.includes(file.type)) {
-      alert('Invalid file type. Only .txt, .pdf, .doc, .docx, .csv files are allowed.');
-      return;
-    }
-
-    if (file.size > 10 * 1024 * 1024) {
-      alert('File size too large. Maximum size is 10MB.');
-      return;
-    }
-
-    setUploadingFile(true);
+    const textToCopy = generatedFollowUp 
+      ? `${generatedFollowUp.subject}\n\n${generatedFollowUp.body}`
+      : amendedContract;
     
     try {
-      // Create FormData for file upload
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('clientId', clientId);
-
-      const response = await fetch('http://localhost:3001/api/upload-client-note', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-        body: formData
-      });
-
-      const data = await response.json();
-      
-      if (data.success) {
-        if (!data.content) {
-          alert('File was uploaded but no content could be extracted. Please copy and paste the content manually.');
-          setNewNote('');
-        } else {
-          setNewNote(data.content);
-          setFileUploaded(true);
-          
-          // If this is a contract amendment workflow, show a helpful message
-          if (isContractAmendment) {
-            console.log('File uploaded successfully for contract amendment');
-          }
-        }
-      } else {
-        alert('Error processing file: ' + (data.error || 'Unknown error'));
-      }
+      await navigator.clipboard.writeText(textToCopy);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
     } catch (error) {
-      console.error('Error uploading file:', error);
-      alert('Error uploading file. Please check if the server is running.');
+      console.error('Failed to copy text:', error);
+    }
+  };
+
+  // Supabase helpers for importing extension notes
+  const handleSupaLogin = async () => {
+    try {
+      setSupaLoading(true);
+      await supaSignInWithPassword(supaEmail, supaPassword);
+      const session = await supaGetSession();
+      setSupaSession(session);
+    } catch (e) {
+      console.error('Supabase login failed', e);
+      alert('Supabase login failed');
     } finally {
-      setUploadingFile(false);
+      setSupaLoading(false);
+    }
+  };
+
+  const handleSupaLoadNotes = async () => {
+    try {
+      setSupaLoading(true);
+      const session = supaSession || (await supaGetSession());
+      if (!session?.user?.id) {
+        alert('Please sign in to Supabase');
+        return;
+      }
+      const items = await supaListUserExtracts(session.user.id);
+      setSupaNotes(items);
+    } catch (e) {
+      console.error('Load notes failed', e);
+      alert('Failed to load notes from extension');
+    } finally {
+      setSupaLoading(false);
+    }
+  };
+
+  const handleSupaUseNote = async (note) => {
+    try {
+      setSupaLoading(true);
+      const data = await supaDownloadJson(note.path);
+      // Prefer converting fields to readable text if structure matches extension
+      let content = '';
+      if (data && Array.isArray(data.fields)) {
+        content = data.fields.map((f, i) => `${f.label || `Field ${i+1}`}:\n${f.text}\n`).join('\n');
+      } else if (typeof data === 'string') {
+        content = data;
+      } else {
+        content = JSON.stringify(data, null, 2);
+      }
+      setClientNotesContent(content);
+      setFileUploaded(true);
+      setClientNotesFile({ name: note.name });
+    } catch (e) {
+      console.error('Use note failed', e);
+      alert('Failed to load selected note');
+    } finally {
+      setSupaLoading(false);
     }
   };
 
@@ -713,69 +865,59 @@ export default function App() {
     e.preventDefault();
     e.stopPropagation();
     setDragActive(false);
-    
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      handleFileUpload(e.dataTransfer.files[0]);
+      if (selectedPathway === 'followup') {
+        handleClientNotesUpload(e.dataTransfer.files[0]);
+      } else {
+        handleFileUpload(e.dataTransfer.files[0]);
+      }
     }
   };
 
   const handleFileInput = (e) => {
     if (e.target.files && e.target.files[0]) {
-      handleFileUpload(e.target.files[0]);
+      if (selectedPathway === 'followup') {
+        handleClientNotesUpload(e.target.files[0]);
+      } else {
+        handleFileUpload(e.target.files[0]);
+      }
     }
   };
 
-  const handleColorChange = (key, value) => {
-    setCustomColors(prev => ({
-      ...prev,
-      [key]: value
-    }));
+  const handleFileUpload = async (file) => {
+    // Placeholder implementation
+    console.log('Uploading file:', file.name);
   };
 
-  const handleTextSizeChange = (key, value) => {
-    setTextSizes(prev => ({
-      ...prev,
-      [key]: value
-    }));
-  };
+  const handleClientNotesUpload = async (file) => {
+    setUploadingFile(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('clientId', clientId);
 
-  const handlePreferenceChange = (key, value) => {
-    setUserPreferences(prev => ({
-      ...prev,
-      [key]: value
-    }));
-  };
+      const response = await fetch('http://localhost:3001/api/upload-client-notes', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        },
+        body: formData
+      });
 
-  // Reset contract amendment states when switching workflows
-  const resetContractAmendment = () => {
-    setIsContractAmendment(false);
-    setAmendmentInstruction('');
-    setAmendedContract(null);
-    setProcessingAmendment(false);
-    setFileUploaded(false);
-  };
-
-  // Reset file upload state when user manually types
-  useEffect(() => {
-    if (newNote && !uploadingFile) {
-      setFileUploaded(false);
+      if (response.ok) {
+        const result = await response.json();
+        setClientNotesFile(file);
+        setClientNotesContent(result.content);
+        setFileUploaded(true);
+      } else {
+        console.error('Failed to upload client notes');
+      }
+    } catch (error) {
+      console.error('Error uploading client notes:', error);
+    } finally {
+      setUploadingFile(false);
     }
-  }, [newNote, uploadingFile]);
-
-  // Save settings when they change (with debounce)
-  useEffect(() => {
-    if (isAuthenticated && token) {
-      const timeoutId = setTimeout(() => {
-        saveUserSettings().then(result => {
-          if (!result.success) {
-            console.warn('Auto-save failed:', result.error);
-          }
-        });
-      }, 2000); // Wait 2 seconds after last change before saving
-
-      return () => clearTimeout(timeoutId);
-    }
-  }, [customColors, textSizes, userPreferences, isAuthenticated, token]);
+  };
 
   // Show authentication screens if not authenticated
   if (!isAuthenticated) {
@@ -787,69 +929,77 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen" style={{ backgroundColor: customColors.background }}>
+    <div className="min-h-screen" style={{ background: customColors.appBackground }}>
       {/* Fixed Header */}
-      <div className="fixed top-0 left-0 right-0 backdrop-blur-md border-b shadow-xl z-50" 
-           style={{ backgroundColor: customColors.cardBackground, borderColor: customColors.cardBorder }}>
+      <div className="fixed top-0 left-0 right-0 border-b shadow-xl z-50"
+           style={{ background: customColors.headerBackground, borderColor: customColors.headerBorder }}>
         <div className="max-w-7xl mx-auto px-6 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-8">
               <div className="flex items-center space-x-4">
                 {/* Updated Logo */}
                 <div className="flex items-center space-x-3">
-                  <div className="w-10 h-10 bg-gradient-to-br from-slate-700 to-slate-900 rounded-lg flex items-center justify-center shadow-lg border border-slate-600">
-                    <svg className="w-6 h-6 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                  <div className="w-12 h-12 bg-white/5 rounded-2xl flex items-center justify-center shadow-lg border" style={{borderColor: customColors.headerBorder}}>
+                    <svg className="w-7 h-7 text-indigo-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
                     </svg>
                   </div>
                   <div>
-                    <h1 className="text-2xl font-light tracking-wide" style={{ color: customColors.textPrimary }}>
+                    <h1 className="text-2xl font-extrabold tracking-tight" style={{ color: customColors.headerText }}>
                       AgentHub
                     </h1>
-                    <p className="text-xs font-medium -mt-1 tracking-wider uppercase" style={{ color: customColors.textSecondary }}>
-                      Real Estate Automation
-                    </p>
+                    {/* Tagline removed as requested */}
                   </div>
                 </div>
               </div>
-              
-              <div className="flex items-center space-x-6">
-                <div>
-                  <label className="block text-sm font-bold mb-1" style={{ color: customColors.textSecondary }}>Agent</label>
-                  <div className="text-sm font-semibold" style={{ color: customColors.textPrimary }}>
-                    {user?.firstName} {user?.lastName}
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-sm font-bold mb-1" style={{ color: customColors.textSecondary }}>Client</label>
-                  <select
-                    value={clientId}
-                    onChange={(e) => setClientId(e.target.value)}
-                    className="border-2 backdrop-blur-sm rounded-lg px-4 py-2 text-base font-semibold focus:outline-none min-w-[200px] shadow-sm"
-                    style={{ 
-                      borderColor: customColors.cardBorder, 
-                      backgroundColor: customColors.cardBackground,
-                      color: customColors.textPrimary
-                    }}
-                  >
-                    {clients.map((client) => (
-                      <option key={client.id} value={client.id}>
-                        {client.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+            </div>
+            
+            {/* Client Selection - Moved to top right */}
+            <div className="flex items-center space-x-4">
+              <div className="flex items-center space-x-3">
+                <span className="text-sm font-medium" style={{ color: customColors.headerText }}>
+                  Client:
+                </span>
+                <select
+                  value={clientId}
+                  onChange={(e) => setClientId(e.target.value)}
+                  className="px-4 py-2 rounded-lg text-sm border shadow-sm bg-transparent"
+                  style={{ 
+                    backgroundColor: 'transparent',
+                    borderColor: customColors.headerBorder,
+                    color: customColors.headerText
+                  }}
+                >
+                  {clients.map((client) => (
+                    <option key={client.id} value={client.id}>
+                      {client.name}
+                    </option>
+                  ))}
+                </select>
               </div>
+
+              {/* Logout Button - Icon only */}
+              <button
+                onClick={handleLogout}
+                aria-label="Logout"
+                className="p-2 rounded-lg transition-all duration-200 hover:bg-white/10"
+                style={{ color: customColors.headerText }}
+                title="Logout"
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                </svg>
+              </button>
             </div>
             
             {/* Settings and Admin Buttons */}
             <div className="flex items-center space-x-3">
               {/* Tab Navigation */}
-              <div className="flex items-center space-x-1 bg-black bg-opacity-20 rounded-lg p-1">
+              <div className="flex items-center space-x-1 bg-white/5 rounded-lg p-1 border" style={{borderColor: customColors.headerBorder}}>
                 <button
-                  onClick={() => setActiveTab('dashboard')}
+                  onClick={handleDashboardClick}
                   className={`px-4 py-2 rounded-md font-bold transition-all duration-200 flex items-center space-x-2 ${
-                    activeTab === 'dashboard' ? 'text-white' : 'text-gray-400 hover:text-white'
+                    activeTab === 'dashboard' ? 'text-white' : 'text-gray-200 hover:text-white'
                   }`}
                   style={{ 
                     backgroundColor: activeTab === 'dashboard' ? customColors.primaryButton : 'transparent'
@@ -861,23 +1011,51 @@ export default function App() {
                   <span>Dashboard</span>
                 </button>
                 <button
-                  onClick={() => setActiveTab('history')}
+                  onClick={() => setActiveTab('clients')}
                   className={`px-4 py-2 rounded-md font-bold transition-all duration-200 flex items-center space-x-2 ${
-                    activeTab === 'history' ? 'text-white' : 'text-gray-400 hover:text-white'
+                    activeTab === 'clients' ? 'text-white' : 'text-gray-200 hover:text-white'
                   }`}
                   style={{ 
-                    backgroundColor: activeTab === 'history' ? customColors.primaryButton : 'transparent'
+                    backgroundColor: activeTab === 'clients' ? customColors.primaryButton : 'transparent'
                   }}
                 >
                   <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
                     <path fillRule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clipRule="evenodd"/>
                   </svg>
-                  <span>History</span>
+                  <span>Clients</span>
+                </button>
+                <button
+                  onClick={() => setActiveTab('contracts')}
+                  className={`px-4 py-2 rounded-md font-bold transition-all duration-200 flex items-center space-x-2 ${
+                    activeTab === 'contracts' ? 'text-white' : 'text-gray-200 hover:text-white'
+                  }`}
+                  style={{ 
+                    backgroundColor: activeTab === 'contracts' ? customColors.primaryButton : 'transparent'
+                  }}
+                >
+                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                    <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                  <span>Contracts</span>
+                </button>
+                <button
+                  onClick={() => setActiveTab('ledger')}
+                  className={`px-4 py-2 rounded-md font-bold transition-all duration-200 flex items-center space-x-2 ${
+                    activeTab === 'ledger' ? 'text-white' : 'text-gray-2 00 hover:text-white'
+                  }`}
+                  style={{ 
+                    backgroundColor: activeTab === 'ledger' ? customColors.primaryButton : 'transparent'
+                  }}
+                >
+                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M3 5a2 2 0 012-2h10a2 2 0 012 2v10a2 2 0 01-2 2H5a2 2 0 01-2-2V5zm3 2h8v2H6V7zm0 4h8v2H6v-2z" clipRule="evenodd"/>
+                  </svg>
+                  <span>Ledger</span>
                 </button>
                 <button
                   onClick={() => setActiveTab('settings')}
                   className={`px-4 py-2 rounded-md font-bold transition-all duration-200 flex items-center space-x-2 ${
-                    activeTab === 'settings' ? 'text-white' : 'text-gray-400 hover:text-white'
+                    activeTab === 'settings' ? 'text-white' : 'text-gray-200 hover:text-white'
                   }`}
                   style={{ 
                     backgroundColor: activeTab === 'settings' ? customColors.primaryButton : 'transparent'
@@ -889,20 +1067,6 @@ export default function App() {
                   <span>Settings</span>
                 </button>
               </div>
-              
-              <button
-                onClick={handleLogout}
-                className="px-4 py-2 rounded-lg font-bold transition-all duration-200 flex items-center space-x-2"
-                style={{ 
-                  backgroundColor: '#EF4444',
-                  color: 'white'
-                }}
-              >
-                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M3 3a1 1 0 00-1 1v12a1 1 0 102 0V4a1 1 0 00-1-1zm10.293 9.293a1 1 0 001.414 1.414l3-3a1 1 0 000-1.414l-3-3a1 1 0 10-1.414 1.414L14.586 9H7a1 1 0 100 2h7.586l-1.293 1.293z" clipRule="evenodd"/>
-                </svg>
-                <span>Logout</span>
-              </button>
             </div>
           </div>
         </div>
@@ -913,577 +1077,725 @@ export default function App() {
         <PasswordChange onClose={() => setShowPasswordChange(false)} />
       )}
 
-      {/* Progress Indicator - Only show on Dashboard */}
-      {activeTab === 'dashboard' && (
-        <div className="pt-24 px-6 pb-6">
-          <div className="max-w-4xl mx-auto mb-8">
-            <div className="flex items-center justify-center space-x-4">
-              <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm ${
-                currentStep >= 1 ? 'text-white' : 'text-gray-300'
-              }`} style={{ backgroundColor: currentStep >= 1 ? customColors.primaryButton : '#4B5563' }}>
-                1
-              </div>
-              <div className={`flex-1 h-1 rounded`} style={{ backgroundColor: currentStep >= 2 ? customColors.primaryButton : '#4B5563' }}></div>
-              <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm ${
-                currentStep >= 2 ? 'text-white' : 'text-gray-300'
-              }`} style={{ backgroundColor: currentStep >= 2 ? customColors.primaryButton : '#4B5563' }}>
-                2
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Main Content */}
       <div className={`px-6 pb-6 ${activeTab === 'dashboard' ? '' : 'pt-24'}`}>
         <div className="max-w-6xl mx-auto">
-          {/* Dashboard Tab */}
-          {activeTab === 'dashboard' && (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-              {/* Step 1: Add Notes Panel */}
-              <div className="backdrop-blur-md rounded-2xl border shadow-2xl p-8"
-                   style={{ 
-                     backgroundColor: customColors.cardBackground, 
-                     borderColor: customColors.cardBorder 
-                   }}>
-                <div className="text-center mb-8">
-                  <h2 className="text-3xl font-black mb-2" style={{ color: customColors.textPrimary }}>Step 1: Add Notes</h2>
-                  <p className="text-lg" style={{ color: customColors.textSecondary }}>
-                    Summarize what you just learned or discussed with the client
-                  </p>
-                </div>
-
-                <form onSubmit={handleSaveNote} className="space-y-6">
-                  <div>
-                    <textarea
-                      value={newNote}
-                      onChange={(e) => setNewNote(e.target.value)}
-                      placeholder="Enter new notes..."
-                      className="w-full p-6 border-2 rounded-xl resize-none placeholder-gray-400 focus:outline-none backdrop-blur-sm text-lg font-medium"
-                      style={{ 
-                        borderColor: customColors.cardBorder, 
-                        backgroundColor: customColors.cardBackground,
-                        color: customColors.textPrimary
-                      }}
-                      rows="6"
-                    />
-                  </div>
-
-                  {/* File Upload */}
-                  <div className="border-t pt-6" style={{ borderColor: customColors.cardBorder }}>
-                    <div className="flex items-center justify-between mb-4">
-                      <h4 className="text-lg font-bold" style={{ color: customColors.textSecondary }}>Or Upload a File</h4>
-                      {isContractAmendment && (
-                        <span className="px-3 py-1 rounded-full text-xs font-bold"
-                              style={{ 
-                                backgroundColor: `${customColors.primaryButton}20`,
-                                color: customColors.primaryButton
-                              }}>
-                          Contract Mode
-                        </span>
-                      )}
-                    </div>
-                    <div
-                      className={`border-2 border-dashed rounded-xl p-6 text-center transition-all duration-200`}
-                      style={{ 
-                        borderColor: dragActive ? customColors.primaryButton : customColors.cardBorder,
-                        backgroundColor: dragActive ? `${customColors.primaryButton}20` : `${customColors.cardBackground}50`
-                      }}
-                      onDragEnter={handleDrag}
-                      onDragLeave={handleDrag}
-                      onDragOver={handleDrag}
-                      onDrop={handleDrop}
-                    >
-                      <input
-                        ref={fileInputRef}
-                        type="file"
-                        onChange={handleFileInput}
-                        accept=".txt,.pdf,.doc,.docx,.csv"
-                        className="hidden"
-                      />
-                      <div className="space-y-3">
-                        <p className="text-base font-semibold" style={{ color: customColors.textSecondary }}>
-                          Drag and drop a file here, or{' '}
-                          <button
-                            type="button"
-                            onClick={() => fileInputRef.current?.click()}
-                            className="underline font-bold"
-                            style={{ color: customColors.primaryButton }}
-                          >
-                            click to browse
-                          </button>
-                        </p>
-                        <p className="text-sm font-semibold" style={{ color: customColors.textSecondary }}>
-                          Supported: .txt, .pdf, .doc, .docx, .csv (max 10MB)
-                        </p>
-                        {isContractAmendment && (
-                          <p className="text-sm font-semibold" style={{ color: customColors.primaryButton }}>
-                            📄 Perfect for contract amendments - AI will process your document
-                          </p>
-                        )}
-                        {uploadingFile && (
-                          <div className="space-y-2">
-                            <p className="text-base font-semibold" style={{ color: customColors.primaryButton }}>
-                              Processing file...
-                            </p>
-                            {isContractAmendment && (
-                              <p className="text-xs" style={{ color: customColors.textSecondary }}>
-                                Extracting text for contract amendment
-                              </p>
-                            )}
-                          </div>
-                        )}
-                        {fileUploaded && !uploadingFile && (
-                          <div className="space-y-2">
-                            <p className="text-base font-semibold" style={{ color: customColors.secondaryButton }}>
-                              ✅ File processed successfully!
-                            </p>
-                            {isContractAmendment && (
-                              <p className="text-xs" style={{ color: customColors.textSecondary }}>
-                                Ready for contract amendment
-                              </p>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Contract Amendment Section */}
-                  <div className="border-t pt-6" style={{ borderColor: customColors.cardBorder }}>
-                    <div className="flex items-center justify-between mb-4">
-                      <label 
-                        className="text-lg font-bold cursor-pointer"
-                        style={{ color: customColors.textPrimary }}
-                      >
-                        This is a contract amendment
-                      </label>
-                      <button
-                        type="button"
-                        onClick={() => setIsContractAmendment(!isContractAmendment)}
-                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 ${
-                          isContractAmendment ? 'focus:ring-blue-500' : 'focus:ring-gray-400'
-                        }`}
-                        style={{ 
-                          backgroundColor: isContractAmendment ? customColors.primaryButton : '#6B7280'
-                        }}
-                      >
-                        <span
-                          className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform duration-200 ${
-                            isContractAmendment ? 'translate-x-6' : 'translate-x-1'
-                          }`}
-                        />
-                      </button>
-                    </div>
-                    
-                    {isContractAmendment && (
-                      <div className="space-y-4">
-                        <label className="block text-lg font-bold" style={{ color: customColors.textSecondary }}>
-                          Describe the changes you want made:
-                        </label>
-                        <textarea
-                          value={amendmentInstruction}
-                          onChange={(e) => setAmendmentInstruction(e.target.value)}
-                          placeholder="e.g., Change the closing date to March 15th, 2024, and increase the earnest money deposit to $10,000..."
-                          className="w-full p-4 border-2 rounded-xl resize-none placeholder-gray-400 focus:outline-none backdrop-blur-sm text-base font-medium"
-                          style={{ 
-                            borderColor: customColors.cardBorder, 
-                            backgroundColor: customColors.cardBackground,
-                            color: customColors.textPrimary
-                          }}
-                          rows="4"
-                        />
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Dynamic Button - Transforms from Save to Generate */}
-                  <div className="flex justify-center">
-                    {!savedNote && !amendedContract ? (
-                      <button
-                        type="submit"
-                        disabled={!newNote.trim() || (isContractAmendment && !amendmentInstruction.trim())}
-                        className="px-12 py-4 rounded-xl transition-all duration-300 font-black text-lg disabled:opacity-50 disabled:cursor-not-allowed shadow-2xl transform hover:scale-105"
-                        style={{ 
-                          backgroundColor: customColors.primaryButton,
-                          color: 'white'
-                        }}
-                      >
-                        {processingAmendment ? 'Processing Amendment...' : (isContractAmendment ? 'Make Amendments' : 'Save Note')}
-                      </button>
-                    ) : amendedContract ? (
-                      <div className="text-center">
-                        <div className="rounded-xl p-4 mb-4 border"
-                             style={{ 
-                               backgroundColor: customColors.cardBackground, 
-                               borderColor: customColors.cardBorder 
-                             }}>
-                          <div className="flex items-center justify-between mb-2">
-                            <h3 className="text-lg font-bold" style={{ color: customColors.textPrimary }}>Amended Contract Ready</h3>
-                            <span className="px-2 py-1 rounded-full text-xs font-bold"
-                                  style={{ 
-                                    backgroundColor: `${customColors.secondaryButton}20`,
-                                    color: customColors.secondaryButton
-                                  }}>
-                              AI Generated
-                            </span>
-                          </div>
-                          <p className="text-sm leading-relaxed" style={{ color: customColors.textSecondary }}>
-                            Contract has been updated with your requested changes
-                          </p>
-                        </div>
-                        
-                        <button
-                          onClick={handleSaveAmendedContract}
-                          className="px-12 py-4 rounded-xl transition-all duration-300 font-black text-lg shadow-2xl transform hover:scale-105"
-                          style={{ 
-                            backgroundColor: customColors.secondaryButton,
-                            color: 'white'
-                          }}
-                        >
-                          Save Amended Contract
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="text-center">
-                        <div className="rounded-xl p-4 mb-4 border"
-                             style={{ 
-                               backgroundColor: customColors.cardBackground, 
-                               borderColor: customColors.cardBorder 
-                             }}>
-                          <div className="flex items-center justify-between mb-2">
-                            <h3 className="text-lg font-bold" style={{ color: customColors.textPrimary }}>Saved Note</h3>
-                            <span className="px-2 py-1 rounded-full text-xs font-bold"
-                                  style={{ 
-                                    backgroundColor: `${customColors.primaryButton}20`,
-                                    color: customColors.primaryButton
-                                  }}>
-                              Tone: {savedNote.tone}
-                            </span>
-                          </div>
-                          <p className="text-sm leading-relaxed" style={{ color: customColors.textSecondary }}>
-                            {savedNote.content.substring(0, 100)}...
-                          </p>
-                        </div>
-                        
-                        <button
-                          onClick={handleGenerateFollowUp}
-                          disabled={loading}
-                          className="px-12 py-4 rounded-xl transition-all duration-300 font-black text-lg disabled:opacity-50 disabled:cursor-not-allowed shadow-2xl transform hover:scale-105"
-                          style={{ 
-                            backgroundColor: customColors.secondaryButton,
-                            color: 'white'
-                          }}
-                        >
-                          {loading ? 'Generating...' : 'Generate Follow-Up'}
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </form>
+          {/* Main Dashboard Tab */}
+          {activeTab === 'dashboard' && !showPathwayInterface && (
+            <div className="pt-44">
+              {/* Welcome Message */}
+              <div className="mb-8">
+                <h1 className="text-5xl font-extrabold mb-2 tracking-tight" style={{ color: customColors.textPrimary }}>
+                  Hello, {user?.firstName || 'User'}.
+                </h1>
+                <p className="text-2xl" style={{ color: customColors.textSecondary }}>
+                  What would you like to do today?
+                </p>
               </div>
 
-              {/* Step 2: Generated Output Panel (Animated Side Panel) */}
-              <div className={`transition-all duration-500 ease-in-out ${
-                (generatedFollowUp || amendedContract) ? 'opacity-100 translate-x-0' : 'opacity-0 translate-x-8'
-              }`}>
-                {generatedFollowUp && (
-                  <div className="backdrop-blur-md rounded-2xl border shadow-2xl p-8 h-full"
-                       style={{ 
-                         backgroundColor: customColors.cardBackground, 
-                         borderColor: customColors.cardBorder 
-                       }}>
-                    <div className="text-center mb-8">
-                      <h2 className="text-3xl font-black mb-2" style={{ color: customColors.textPrimary }}>Step 2: Review & Send</h2>
-                      <p className="text-lg" style={{ color: customColors.textSecondary }}>
-                        Here's what AgentHub generated from your notes
-                      </p>
+              {/* Cards Grid */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 max-w-6xl mx-auto">
+                {/* Card 1: Modify a Contract */}
+                <div 
+                  onClick={() => handlePathwaySelect('contract')}
+                  className="rounded-2xl border shadow-xl p-8 cursor-pointer transition-all duration-300 hover:scale-[1.02] hover:shadow-2xl"
+                  style={{ 
+                    background: customColors.gradientCardBlue,
+                    borderColor: customColors.cardBorder 
+                  }}
+                >
+                  <div className="text-center">
+                    <div className="w-16 h-16 mx-auto mb-6 bg-gradient-to-br from-blue-500 to-blue-600 rounded-2xl flex items-center justify-center shadow-lg">
+                      <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                      </svg>
                     </div>
+                    <h3 className="text-2xl font-bold mb-3" style={{ color: customColors.textPrimary }}>
+                      Modify a Contract
+                    </h3>
+                    <p className="text-lg" style={{ color: customColors.textSecondary }}>
+                      Quickly apply changes to standard real estate forms
+                    </p>
+                  </div>
+                </div>
 
-                    {/* Follow-up Preview Card */}
-                    <div className="rounded-xl p-6 border mb-6"
-                         style={{ 
-                           backgroundColor: customColors.cardBackground, 
-                           borderColor: customColors.cardBorder 
-                         }}>
-                      <div className="flex items-center justify-between mb-4">
-                        <h3 className="text-xl font-bold" style={{ color: customColors.textPrimary }}>Follow-up Preview</h3>
-                        <span className="px-3 py-1 rounded-full text-sm font-bold"
-                              style={{ 
-                                backgroundColor: `${customColors.primaryButton}20`,
-                                color: customColors.primaryButton
-                              }}>
-                          Tone: {generatedFollowUp.tone}
-                        </span>
-                      </div>
-                      
-                      <div className="space-y-4">
-                        <div>
-                          <label className="block text-sm font-bold mb-2" style={{ color: customColors.textSecondary, fontSize: textSizes.labels }}>Subject</label>
-                          <p className="font-semibold" style={{ color: customColors.textPrimary, fontSize: textSizes.subject }}>{generatedFollowUp.subject}</p>
-                        </div>
-                        
-                        <div>
-                          <label className="block text-sm font-bold mb-2" style={{ color: customColors.textSecondary, fontSize: textSizes.labels }}>Email Body</label>
-                          <div className="p-4 rounded-lg border"
-                               style={{ 
-                                 backgroundColor: `${customColors.cardBackground}50`, 
-                                 borderColor: customColors.cardBorder 
-                               }}>
-                            <p className="leading-relaxed whitespace-pre-wrap" style={{ color: customColors.textSecondary, fontSize: textSizes.emailBody }}>
-                              {generatedFollowUp.body}
+                {/* Card 2: Generate a Follow-Up Message */}
+                <div 
+                  onClick={() => handlePathwaySelect('followup')}
+                  className="rounded-2xl border shadow-xl p-8 cursor-pointer transition-all duration-300 hover:scale-[1.02] hover:shadow-2xl"
+                  style={{ 
+                    background: customColors.gradientCardGreen,
+                    borderColor: customColors.cardBorder 
+                  }}
+                >
+                  <div className="text-center">
+                    <div className="w-16 h-16 mx-auto mb-6 bg-gradient-to-br from-green-500 to-green-600 rounded-2xl flex items-center justify-center shadow-lg">
+                      <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                      </svg>
+                    </div>
+                    <h3 className="text-2xl font-bold mb-3" style={{ color: customColors.textPrimary }}>
+                      Generate a Follow-Up Message
+                    </h3>
+                    <p className="text-lg" style={{ color: customColors.textSecondary }}>
+                      Turn notes into an email or text for your client
+                    </p>
+                  </div>
+                </div>
+
+                {/* Card 3: Schedule Showing */}
+                <div 
+                  onClick={() => setActiveTab('clients')}
+                  className="rounded-2xl border shadow-xl p-8 cursor-pointer transition-all duration-300 hover:scale-[1.02] hover:shadow-2xl"
+                  style={{ 
+                    background: customColors.gradientCardIndigo,
+                    borderColor: customColors.cardBorder 
+                  }}
+                >
+                  <div className="text-center">
+                    <div className="w-16 h-16 mx-auto mb-6 bg-gradient-to-br from-indigo-500 to-indigo-600 rounded-2xl flex items-center justify-center shadow-lg">
+                      <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                      </svg>
+                    </div>
+                    <h3 className="text-2xl font-bold mb-3" style={{ color: customColors.textPrimary }}>
+                      Schedule Showing
+                    </h3>
+                    <p className="text-lg" style={{ color: customColors.textSecondary }}>
+                      Book a property showing and notify your client
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Recent Activity Section */}
+              <div className="mt-12">
+                <h2 className="text-2xl font-bold mb-6" style={{ color: customColors.textPrimary }}>
+                  Recent Activity
+                </h2>
+                <div className="space-y-3">
+                  {recentActivity.length > 0 ? (
+                    recentActivity.slice(0, 5).map((activity, index) => (
+                      <div
+                        key={`${activity.type}-${activity.id || index}`}
+                        onClick={() => handleActivityClick(activity)}
+                        className="p-4 rounded-lg cursor-pointer transition-all duration-200 hover:bg-white hover:bg-opacity-10"
+                        style={{ 
+                          backgroundColor: customColors.cardBackground,
+                          borderColor: customColors.cardBorder,
+                          border: '1px solid'
+                        }}
+                      >
+                        <div className="flex items-center space-x-3">
+                          <div className="w-2 h-2 rounded-full bg-blue-500"></div>
+                          <div className="flex-1">
+                            <p className="text-sm" style={{ color: customColors.textSecondary }}>
+                              {activity.type === 'note' 
+                                ? `You created a note for ${clients.find(c => c.id === activity.client_id)?.name || 'a client'}`
+                                : `You generated a follow-up message for ${clients.find(c => c.id === activity.client_id)?.name || 'a client'}`
+                              }
+                            </p>
+                            <p className="text-xs opacity-70" style={{ color: customColors.textSecondary }}>
+                              {formatTimeAgo(activity.date)}
                             </p>
                           </div>
                         </div>
-                      </div>
-                    </div>
-
-                    {/* Scheduling */}
-                    <div className="mb-6">
-                      <label className="block text-lg font-bold mb-4" style={{ color: customColors.textSecondary }}>Schedule Send Time</label>
-                      <input
-                        type="datetime-local"
-                        value={scheduledTime}
-                        onChange={(e) => setScheduledTime(e.target.value)}
-                        className="border-2 rounded-lg px-4 py-3 text-base font-semibold focus:outline-none"
-                        style={{ 
-                          borderColor: customColors.cardBorder, 
-                          backgroundColor: customColors.cardBackground,
-                          color: customColors.textPrimary
-                        }}
-                      />
-                    </div>
-
-                    {/* Action Buttons */}
-                    <div className="flex justify-center space-x-4">
-                      <button
-                        onClick={handleSendNow}
-                        className="px-6 py-3 rounded-xl transition-all duration-300 font-bold shadow-lg"
-                        style={{ 
-                          backgroundColor: customColors.secondaryButton,
-                          color: 'white'
-                        }}
-                      >
-                        Send Now
-                      </button>
-                      
-                      <button
-                        onClick={handleCopyMessage}
-                        className={`px-6 py-3 rounded-xl transition-all duration-300 font-bold shadow-lg ${
-                          copied ? 'bg-green-500 text-white' : ''
-                        }`}
-                        style={!copied ? { 
-                          backgroundColor: customColors.primaryButton,
-                          color: 'white'
-                        } : {}}
-                      >
-                        {copied ? 'Copied!' : 'Copy'}
-                      </button>
-                      
-                      <button
-                        onClick={handleSchedule}
-                        className="px-6 py-3 rounded-xl transition-all duration-300 font-bold shadow-lg"
-                        style={{ 
-                          backgroundColor: '#F59E0B',
-                          color: 'white'
-                        }}
-                      >
-                        Schedule
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {amendedContract && (
-                  <div className="backdrop-blur-md rounded-2xl border shadow-2xl p-8 h-full"
-                       style={{ 
-                         backgroundColor: customColors.cardBackground, 
-                         borderColor: customColors.cardBorder 
-                       }}>
-                    <div className="text-center mb-8">
-                      <h2 className="text-3xl font-black mb-2" style={{ color: customColors.textPrimary }}>Step 2: Review Amendment</h2>
-                      <p className="text-lg" style={{ color: customColors.textSecondary }}>
-                        Here's your contract with the requested changes
-                      </p>
-                    </div>
-
-                    {/* Amended Contract Preview Card */}
-                    <div className="rounded-xl p-6 border mb-6"
-                         style={{ 
-                           backgroundColor: customColors.cardBackground, 
-                           borderColor: customColors.cardBorder 
-                         }}>
-                      <div className="flex items-center justify-between mb-4">
-                        <h3 className="text-xl font-bold" style={{ color: customColors.textPrimary }}>Amended Contract</h3>
-                        <span className="px-3 py-1 rounded-full text-sm font-bold"
-                              style={{ 
-                                backgroundColor: `${customColors.secondaryButton}20`,
-                                color: customColors.secondaryButton
-                              }}>
-                          AI Generated
-                        </span>
-                      </div>
-                      
-                      <div className="space-y-4">
-                        <div>
-                          <label className="block text-sm font-bold mb-2" style={{ color: customColors.textSecondary, fontSize: textSizes.labels }}>Changes Made</label>
-                          <p className="text-sm font-semibold" style={{ color: customColors.textPrimary, fontSize: textSizes.labels }}>
-                            {amendmentInstruction}
-                          </p>
-                        </div>
                         
-                        <div>
-                          <label className="block text-sm font-bold mb-2" style={{ color: customColors.textSecondary, fontSize: textSizes.labels }}>Amended Contract</label>
-                          <div className="p-4 rounded-lg border max-h-96 overflow-y-auto"
-                               style={{ 
-                                 backgroundColor: `${customColors.cardBackground}50`, 
-                                 borderColor: customColors.cardBorder 
-                               }}>
-                            <div 
-                              className="leading-relaxed whitespace-pre-wrap" 
-                              style={{ color: customColors.textSecondary, fontSize: textSizes.emailBody }}
-                              dangerouslySetInnerHTML={{ __html: amendedContract.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') }}
-                            />
-                          </div>
-                        </div>
+                        {/* Blockchain Info */}
+                        {activity.blockchainTx && (
+                          <BlockchainInfo
+                            txHash={activity.blockchainTx}
+                            activityType={activity.type === 'note' ? 'note_creation' : 'message_generation'}
+                            timestamp={activity.blockchainTimestamp || activity.date}
+                            customColors={customColors}
+                          />
+                        )}
                       </div>
+                    ))
+                  ) : (
+                    <div className="text-center py-8" style={{ color: customColors.textSecondary }}>
+                      <p>No recent activity</p>
                     </div>
-
-                    {/* Action Buttons */}
-                    <div className="flex justify-center space-x-4">
-                      <button
-                        onClick={handleSaveAmendedContract}
-                        className="px-6 py-3 rounded-xl transition-all duration-300 font-bold shadow-lg"
-                        style={{ 
-                          backgroundColor: customColors.secondaryButton,
-                          color: 'white'
-                        }}
-                      >
-                        Save Contract
-                      </button>
-                      
-                      <button
-                        onClick={() => {
-                          const textArea = document.createElement('textarea');
-                          textArea.value = amendedContract.replace(/\*\*(.*?)\*\*/g, '$1');
-                          document.body.appendChild(textArea);
-                          textArea.select();
-                          document.execCommand('copy');
-                          document.body.removeChild(textArea);
-                          setCopied(true);
-                          setTimeout(() => setCopied(false), 2000);
-                        }}
-                        className={`px-6 py-3 rounded-xl transition-all duration-300 font-bold shadow-lg ${
-                          copied ? 'bg-green-500 text-white' : ''
-                        }`}
-                        style={!copied ? { 
-                          backgroundColor: customColors.primaryButton,
-                          color: 'white'
-                        } : {}}
-                      >
-                        {copied ? 'Copied!' : 'Copy'}
-                      </button>
-                    </div>
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
             </div>
           )}
 
+          {/* Pathway Interface */}
+          {activeTab === 'dashboard' && showPathwayInterface && (
+            <div className="pt-8">
+              {/* Back Button */}
+              <div className="mb-8">
+                <button
+                  onClick={handleBackToCards}
+                  className="flex items-center space-x-2 px-4 py-2 rounded-lg transition-all duration-200 hover:bg-white hover:bg-opacity-10"
+                  style={{ color: customColors.textSecondary }}
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                  </svg>
+                  <span>Back to AI Assistant</span>
+                </button>
+              </div>
+
+              {/* Pathway-specific content */}
+              {selectedPathway === 'contract' && (
+                <div className="max-w-6xl mx-auto">
+                  <div className="text-center mb-8">
+                    <div className="w-24 h-24 mx-auto mb-6 bg-gradient-to-br from-blue-500 to-blue-600 rounded-2xl flex items-center justify-center shadow-lg">
+                      <svg className="w-12 h-12 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                      </svg>
+                    </div>
+                    <h3 className="text-2xl font-bold mb-3" style={{ color: customColors.textPrimary }}>
+                      Modify a Contract
+                    </h3>
+                    <p className="text-lg" style={{ color: customColors.textSecondary }}>
+                      Complete contract modification and signing workflow
+                    </p>
+                  </div>
+
+                  {/* Animated Contract Flow */}
+                  <AnimatedContractFlow
+                    onClose={() => {
+                      setContractDocument('');
+                      setContractStep(1);
+                      setSelectedJurisdiction('');
+                    }}
+                    customColors={customColors}
+                    token={token}
+                  />
+                </div>
+              )}
+
+              {selectedPathway === 'followup' && (
+                <div className="max-w-4xl mx-auto">
+                  <div className="text-center mb-8">
+                    <div className="w-24 h-24 mx-auto mb-6 bg-gradient-to-br from-green-500 to-green-600 rounded-2xl flex items-center justify-center shadow-lg">
+                      <svg className="w-12 h-12 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                      </svg>
+                    </div>
+                    <h3 className="text-2xl font-bold mb-3" style={{ color: customColors.textPrimary }}>
+                      Generate Follow-Up Message
+                    </h3>
+                    <p className="text-lg" style={{ color: customColors.textSecondary }}>
+                      Upload your client notes and generate a personalized message
+                    </p>
+                  </div>
+
+                  <div className="backdrop-blur-md rounded-2xl border shadow-2xl p-8"
+                       style={{ backgroundColor: customColors.cardBackground, borderColor: customColors.cardBorder }}>
+                    
+                    {/* File Upload Section */}
+                    <div className="mb-8">
+                      <h4 className="text-xl font-bold mb-4" style={{ color: customColors.textPrimary }}>
+                        Upload Client Notes
+                      </h4>
+                      <p className="text-sm mb-6" style={{ color: customColors.textSecondary }}>
+                        Upload a file containing your client notes, meeting minutes, or any relevant information
+                      </p>
+                      
+                      <div
+                        onDragEnter={handleDrag}
+                        onDragLeave={handleDrag}
+                        onDragOver={handleDrag}
+                        onDrop={handleDrop}
+                        className={`border-2 border-dashed rounded-lg p-8 text-center transition-all duration-200 ${
+                          dragActive ? 'border-blue-400 bg-blue-50 bg-opacity-10' : ''
+                        }`}
+                        style={{ borderColor: customColors.cardBorder }}
+                      >
+                        <input
+                          ref={fileInputRef}
+                          type="file"
+                          onChange={handleFileInput}
+                          className="hidden"
+                          accept=".txt,.doc,.docx,.pdf"
+                        />
+                        
+                        {!fileUploaded ? (
+                          <div>
+                            <svg className="w-12 h-12 mx-auto mb-4" style={{ color: customColors.textSecondary }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                            </svg>
+                            <p className="text-lg mb-2" style={{ color: customColors.textPrimary }}>
+                              Drag and drop your file here, or
+                            </p>
+                            <button
+                              onClick={() => fileInputRef.current?.click()}
+                              className="px-6 py-2 rounded-lg font-bold transition-all duration-200"
+                              style={{ 
+                                backgroundColor: customColors.primaryButton,
+                                color: 'white'
+                              }}
+                            >
+                              Browse Files
+                            </button>
+                            <p className="text-sm mt-2" style={{ color: customColors.textSecondary }}>
+                              Supports .txt, .doc, .docx, .pdf files
+                            </p>
+                          </div>
+                        ) : (
+                          <div>
+                            <svg className="w-12 h-12 mx-auto mb-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                            </svg>
+                            <p className="text-lg mb-2" style={{ color: customColors.textPrimary }}>
+                              File uploaded successfully!
+                            </p>
+                            <p className="text-sm" style={{ color: customColors.textSecondary }}>
+                              {clientNotesFile?.name}
+                            </p>
+                            <button
+                              onClick={() => {
+                                setFileUploaded(false);
+                                setClientNotesFile(null);
+                                setClientNotesContent('');
+                              }}
+                              className="mt-2 px-4 py-1 rounded text-sm transition-all duration-200"
+                              style={{ 
+                                backgroundColor: customColors.secondaryButton,
+                                color: 'white'
+                              }}
+                            >
+                              Upload Different File
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Import from Extension (Supabase) */}
+                    <div className="mb-8 border rounded-lg p-4" style={{ borderColor: customColors.cardBorder }}>
+                      <h4 className="text-xl font-bold mb-4" style={{ color: customColors.textPrimary }}>
+                        Import from Extension
+                      </h4>
+                      {!supaSession ? (
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-2 items-end">
+                          <div>
+                            <label className="block text-sm mb-1" style={{ color: customColors.textSecondary }}>Email</label>
+                            <input
+                              value={supaEmail}
+                              onChange={(e) => setSupaEmail(e.target.value)}
+                              className="w-full px-3 py-2 rounded-lg border bg-transparent"
+                              style={{ borderColor: customColors.cardBorder, color: customColors.textPrimary }}
+                              placeholder="you@company.com"
+                              type="email"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm mb-1" style={{ color: customColors.textSecondary }}>Password</label>
+                            <input
+                              value={supaPassword}
+                              onChange={(e) => setSupaPassword(e.target.value)}
+                              className="w-full px-3 py-2 rounded-lg border bg-transparent"
+                              style={{ borderColor: customColors.cardBorder, color: customColors.textPrimary }}
+                              placeholder="••••••••"
+                              type="password"
+                            />
+                          </div>
+                          <div className="flex md:justify-end">
+                            <button
+                              onClick={handleSupaLogin}
+                              disabled={supaLoading}
+                              className="px-4 py-2 rounded-lg font-bold"
+                              style={{ backgroundColor: customColors.primaryButton, color: 'white' }}
+                            >
+                              {supaLoading ? 'Signing In…' : 'Sign in'}
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div>
+                          <div className="flex items-center justify-between mb-3">
+                            <p className="text-sm" style={{ color: customColors.textSecondary }}>
+                              Signed in to Supabase
+                            </p>
+                            <button
+                              onClick={handleSupaLoadNotes}
+                              disabled={supaLoading}
+                              className="px-3 py-2 rounded-lg font-bold"
+                              style={{ backgroundColor: customColors.secondaryButton, color: 'white' }}
+                            >
+                              {supaLoading ? 'Loading…' : 'Load Notes'}
+                            </button>
+                          </div>
+                          {supaNotes.length > 0 && (
+                            <div className="space-y-2 max-h-48 overflow-auto">
+                              {supaNotes.map((n) => (
+                                <div key={n.path} className="flex items-center justify-between p-2 rounded border" style={{ borderColor: customColors.cardBorder }}>
+                                  <div className="text-sm" style={{ color: customColors.textSecondary }}>{n.name}</div>
+                                  <button
+                                    onClick={() => handleSupaUseNote(n)}
+                                    className="px-3 py-1 text-sm rounded-lg font-bold"
+                                    style={{ backgroundColor: customColors.primaryButton, color: 'white' }}
+                                  >
+                                    Use
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Generate Follow-Up Button */}
+                    <div className="text-center">
+                      <button
+                        onClick={handleGenerateFollowUp}
+                        disabled={!fileUploaded || loading}
+                        className="px-8 py-4 rounded-lg font-bold transition-all duration-200 flex items-center space-x-3 mx-auto disabled:opacity-50"
+                        style={{ 
+                          backgroundColor: customColors.secondaryButton,
+                          color: 'white'
+                        }}
+                      >
+                        {loading ? (
+                          <>
+                            <svg className="animate-spin w-6 h-6" fill="none" viewBox="0 0 24 24">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            <span>Generating...</span>
+                          </>
+                        ) : (
+                          <>
+                            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                            </svg>
+                            <span>Generate Follow-Up Message</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+
+                    {/* Generated Follow-Up Display */}
+                    {generatedFollowUp && (
+                      <div className="mt-8">
+                        <h5 className="text-lg font-bold mb-4" style={{ color: customColors.textPrimary }}>
+                          Generated Follow-Up Message:
+                        </h5>
+                        <div className="space-y-4">
+                          <div>
+                            <label className="block text-sm font-bold mb-2" style={{ color: customColors.textSecondary }}>
+                              Subject:
+                            </label>
+                            <div className="p-3 rounded-lg border-2"
+                                 style={{ 
+                                   borderColor: customColors.cardBorder,
+                                   backgroundColor: customColors.cardBackground
+                                 }}>
+                              <p style={{ color: customColors.textPrimary }}>{generatedFollowUp.subject}</p>
+                            </div>
+                          </div>
+                          <div>
+                            <label className="block text-sm font-bold mb-2" style={{ color: customColors.textSecondary }}>
+                              Message:
+                            </label>
+                            <div className="p-4 rounded-lg border-2 max-h-96 overflow-y-auto"
+                                 style={{ 
+                                   borderColor: customColors.cardBorder,
+                                   backgroundColor: customColors.cardBackground
+                                 }}>
+                              <pre className="whitespace-pre-wrap text-sm" style={{ color: customColors.textPrimary }}>
+                                {generatedFollowUp.body}
+                              </pre>
+                            </div>
+                          </div>
+                          <div className="flex space-x-4">
+                            <button
+                              onClick={handleCopyMessage}
+                              className="px-4 py-2 rounded-lg font-bold transition-all duration-200 flex items-center space-x-2"
+                              style={{ 
+                                backgroundColor: customColors.secondaryButton,
+                                color: 'white'
+                              }}
+                            >
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                              </svg>
+                              <span>{copied ? 'Copied!' : 'Copy Message'}</span>
+                            </button>
+                            <button
+                              onClick={handleSendNow}
+                              className="px-4 py-2 rounded-lg font-bold transition-all duration-200 flex items-center space-x-2"
+                              style={{ 
+                                backgroundColor: customColors.primaryButton,
+                                color: 'white'
+                              }}
+                            >
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 4.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                              </svg>
+                              <span>Send Now</span>
+                            </button>
+                          </div>
+                          
+                          {/* Blockchain Info */}
+                          {generatedFollowUp.blockchainTx && (
+                            <BlockchainInfo
+                              txHash={generatedFollowUp.blockchainTx}
+                              activityType="message_generation"
+                              timestamp={generatedFollowUp.blockchainTimestamp || generatedFollowUp.date}
+                              customColors={customColors}
+                            />
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Placeholder for other pathways */}
+              {(selectedPathway === 'meeting' || selectedPathway === 'documents' || selectedPathway === 'suggest') && (
+                <div className="text-center py-12">
+                  <div className="w-24 h-24 mx-auto mb-6 bg-gradient-to-br from-gray-500 to-gray-600 rounded-2xl flex items-center justify-center shadow-lg">
+                    <svg className="w-12 h-12 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                    </svg>
+                  </div>
+                  <h3 className="text-2xl font-bold mb-3" style={{ color: customColors.textPrimary }}>
+                    Coming Soon
+                  </h3>
+                  <p className="text-lg" style={{ color: customColors.textSecondary }}>
+                    This feature is under development
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Agent Dashboard Tab */}
+          {activeTab === 'clients' && (
+            <AgentDashboard
+              user={user}
+              customColors={customColors}
+              clientId={clientId}
+              setClientId={setClientId}
+              clients={clients}
+              onGenerateFollowUp={() => {
+                console.log('onGenerateFollowUp called from App.js');
+                console.log('Current activeTab:', activeTab);
+                setActiveTab('dashboard');
+                handlePathwaySelect('followup');
+                console.log('After navigation - activeTab: dashboard, pathway: followup');
+              }}
+              onContractAmendment={() => {
+                console.log('onContractAmendment called from App.js');
+                console.log('Current activeTab:', activeTab);
+                setActiveTab('dashboard');
+                handlePathwaySelect('contract');
+                console.log('After navigation - activeTab: dashboard, pathway: contract');
+              }}
+              onDocuSignCreate={() => {
+                console.log('onDocuSignCreate called from App.js');
+                console.log('Current showDocuSignForm:', showDocuSignForm);
+                setShowDocuSignForm(true);
+                console.log('After setShowDocuSignForm - showDocuSignForm:', true);
+              }}
+            />
+          )}
+
+          {/* Ledger Tab */}
+          {activeTab === 'ledger' && (
+            <BlockchainTracker
+              customColors={customColors}
+            />
+          )}
+
+          {/* Contracts Tab */}
+          {activeTab === 'contracts' && (
+            <ContractsPage
+              customColors={customColors}
+              token={token}
+              clientId={clientId}
+              onModifySelected={({ state, document, content }) => {
+                // Navigate to dashboard to show the animated contract flow (which contains DocuSign step)
+                setActiveTab('dashboard');
+                handlePathwaySelect('contract');
+                // Optionally seed the amendment instruction/contract content in the flow later
+              }}
+            />
+          )}
+
           {/* History Tab */}
-          {activeTab === 'history' && (
+          {activeTab === 'history_disabled' && (
             <div className="backdrop-blur-md rounded-2xl border shadow-2xl p-8"
                  style={{ 
                    backgroundColor: customColors.cardBackground, 
                    borderColor: customColors.cardBorder 
                  }}>
-              <div className="text-center mb-8">
-                <h2 className="text-3xl font-black mb-2" style={{ color: customColors.textPrimary }}>
-                  <svg className="w-8 h-8 inline-block mr-2" fill="currentColor" viewBox="0 0 20 20" style={{ color: customColors.primaryButton }}>
-                    <path fillRule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clipRule="evenodd"/>
-                  </svg>
+              
+              {/* Communication History Section */}
+              <div className="mb-12">
+                <h2 className="text-3xl font-black mb-6" style={{ color: customColors.textPrimary }}>
                   Communication History
                 </h2>
-                <p className="text-lg" style={{ color: customColors.textSecondary }}>
+                <p className="text-lg mb-6" style={{ color: customColors.textSecondary }}>
                   View all your previous correspondence and generated messages
                 </p>
-              </div>
-
-              {/* Filter Buttons */}
-              <div className="flex space-x-4 mb-6 justify-center">
-                <button className="px-4 py-2 rounded-lg font-bold"
-                        style={{ 
-                          backgroundColor: `${customColors.primaryButton}20`,
-                          color: customColors.primaryButton
-                        }}>
-                  This Week
-                </button>
-                <button className="px-4 py-2 rounded-lg font-bold"
-                        style={{ 
-                          backgroundColor: `${customColors.cardBackground}50`,
-                          color: customColors.textSecondary
-                        }}>
-                  This Month
-                </button>
-                <button className="px-4 py-2 rounded-lg font-bold"
-                        style={{ 
-                          backgroundColor: `${customColors.cardBackground}50`,
-                          color: customColors.textSecondary
-                        }}>
-                  All Time
-                </button>
-              </div>
-              
-              {/* History Items */}
-              <div className="space-y-4 max-h-96 overflow-y-auto">
-                {communicationHistory.map((item) => (
-                  <div key={item.id} className="rounded-xl border transition-all duration-200"
-                       style={{ 
-                         backgroundColor: customColors.cardBackground, 
-                         borderColor: customColors.cardBorder 
-                       }}>
-                    <div 
-                      className="p-4 cursor-pointer"
-                      onClick={() => toggleHistoryItem(item.id)}
-                    >
-                      <div className="flex items-center justify-between mb-2">
-                        <h4 className="font-bold text-sm" style={{ color: customColors.textPrimary }}>{item.subject}</h4>
-                        <div className="flex items-center space-x-2">
-                          <span className="px-2 py-1 rounded text-xs font-bold"
-                                style={{ 
-                                  backgroundColor: `${customColors.primaryButton}20`,
-                                  color: customColors.primaryButton
-                                }}>
-                            {item.tone}
-                          </span>
-                          <span className="text-xs" style={{ color: customColors.textSecondary }}>
-                            {expandedHistoryItems.has(item.id) ? '▼' : '▶'}
+                
+                {communicationHistory.length === 0 ? (
+                  <div className="text-center py-8">
+                    <div className="w-16 h-16 mx-auto mb-4 bg-gradient-to-br from-blue-500 to-blue-600 rounded-full flex items-center justify-center">
+                      <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                      </svg>
+                    </div>
+                    <p className="text-lg" style={{ color: customColors.textSecondary }}>
+                      No communication history yet
+                    </p>
+                    <p className="text-sm mt-2" style={{ color: customColors.textSecondary }}>
+                      Your sent messages and follow-ups will appear here
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {communicationHistory.map((item) => (
+                      <div key={item.id} className="p-4 rounded-lg border" style={{ borderColor: customColors.cardBorder }}>
+                        <div className="flex justify-between items-start mb-2">
+                          <h3 className="font-semibold" style={{ color: customColors.textPrimary }}>
+                            {item.subject}
+                          </h3>
+                          <span className="text-sm" style={{ color: customColors.textSecondary }}>
+                            {new Date(item.date).toLocaleDateString()}
                           </span>
                         </div>
-                      </div>
-                      <p className="text-xs mb-2" style={{ color: customColors.textSecondary }}>{item.preview}</p>
-                      <p className="text-xs" style={{ color: customColors.textSecondary }}>
-                        {new Date(item.date).toLocaleDateString()} at {new Date(item.date).toLocaleTimeString()}
-                        {item.scheduled && ' (Scheduled)'}
-                      </p>
-                    </div>
-                    
-                    {/* Expanded Content */}
-                    {expandedHistoryItems.has(item.id) && (
-                      <div className="px-4 pb-4 border-t" style={{ borderColor: customColors.cardBorder }}>
-                        <p className="text-sm leading-relaxed mt-3" style={{ color: customColors.textSecondary }}>
-                          {item.fullMessage}
+                        <p className="text-sm mb-2" style={{ color: customColors.textSecondary }}>
+                          {item.body.substring(0, 150)}...
                         </p>
+                        <div className="flex items-center space-x-2">
+                          <span className="px-2 py-1 text-xs rounded-full" style={{ 
+                            backgroundColor: customColors.primaryButton,
+                            color: 'white'
+                          }}>
+                            {item.scheduled ? 'Scheduled' : 'Sent'}
+                          </span>
+                          {item.tone && (
+                            <span className="px-2 py-1 text-xs rounded-full bg-gray-600 text-white">
+                              {item.tone}
+                            </span>
+                          )}
+                        </div>
                       </div>
-                    )}
+                    ))}
                   </div>
-                ))}
+                )}
+              </div>
+
+              {/* Contracts Section */}
+              <div className="border-t pt-8" style={{ borderColor: customColors.cardBorder }}>
+                <h2 className="text-3xl font-black mb-6" style={{ color: customColors.textPrimary }}>
+                  Contracts
+                </h2>
+                <p className="text-lg mb-6" style={{ color: customColors.textSecondary }}>
+                  View all your amended contracts and modifications
+                </p>
                 
-                {communicationHistory.length === 0 && (
+                {contractHistory.length === 0 ? (
                   <div className="text-center py-8">
+                    <div className="w-16 h-16 mx-auto mb-4 bg-gradient-to-br from-green-500 to-green-600 rounded-full flex items-center justify-center">
+                      <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                      </svg>
+                    </div>
                     <p className="text-lg" style={{ color: customColors.textSecondary }}>
-                      No communication history yet. Start by generating your first follow-up message!
+                      No contracts yet
                     </p>
+                    <p className="text-sm mt-2" style={{ color: customColors.textSecondary }}>
+                      Your amended contracts will appear here
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {contractHistory.map((contract) => (
+                      <div key={contract.id} className="p-4 rounded-lg border" style={{ borderColor: customColors.cardBorder }}>
+                        <div className="flex justify-between items-start mb-2">
+                          <h3 className="font-semibold" style={{ color: customColors.textPrimary }}>
+                            {contract.document || 'Contract Amendment'}
+                          </h3>
+                          <span className="text-sm" style={{ color: customColors.textSecondary }}>
+                            {new Date(contract.date).toLocaleDateString()}
+                          </span>
+                        </div>
+                        <div className="mb-2">
+                          <span className="px-2 py-1 text-xs rounded-full bg-gray-600 text-white mr-2">
+                            {contract.jurisdiction || 'Unknown Jurisdiction'}
+                          </span>
+                          <span className="px-2 py-1 text-xs rounded-full" style={{ 
+                            backgroundColor: customColors.secondaryButton,
+                            color: 'white'
+                          }}>
+                            Amended
+                          </span>
+                        </div>
+                        <p className="text-sm mb-2" style={{ color: customColors.textSecondary }}>
+                          <strong>Instruction:</strong> {contract.amendmentInstruction}
+                        </p>
+                        <div className="mb-3 p-3 rounded bg-gray-800 bg-opacity-50">
+                          <p className="text-xs mb-1" style={{ color: customColors.textSecondary }}>
+                            <strong>Contract Preview:</strong>
+                          </p>
+                          <p className="text-xs" style={{ color: customColors.textSecondary }}>
+                            {contract.amendedContract.substring(0, 200)}...
+                          </p>
+                        </div>
+                        <div className="flex space-x-2">
+                          <button
+                            onClick={() => {
+                              navigator.clipboard.writeText(contract.amendedContract);
+                              setCopied(true);
+                              setTimeout(() => setCopied(false), 2000);
+                            }}
+                            className="px-3 py-1 text-xs rounded-lg font-medium transition-all duration-200 flex items-center space-x-1"
+                            style={{ 
+                              backgroundColor: customColors.primaryButton,
+                              color: 'white'
+                            }}
+                          >
+                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                            </svg>
+                            <span>Copy</span>
+                          </button>
+                          <button
+                            onClick={() => {
+                              const blob = new Blob([contract.amendedContract], { type: 'text/plain' });
+                              const url = URL.createObjectURL(blob);
+                              const a = document.createElement('a');
+                              a.href = url;
+                              a.download = `${contract.document || 'contract'}_amended.txt`;
+                              a.click();
+                              URL.revokeObjectURL(url);
+                            }}
+                            className="px-3 py-1 text-xs rounded-lg font-medium transition-all duration-200 flex items-center space-x-1"
+                            style={{ 
+                              backgroundColor: customColors.secondaryButton,
+                              color: 'white'
+                            }}
+                          >
+                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                            </svg>
+                            <span>Download</span>
+                          </button>
+                        </div>
+                        
+                        {/* Blockchain Info */}
+                        {contract.blockchainTx && (
+                          <BlockchainInfo
+                            txHash={contract.blockchainTx}
+                            activityType="contract_modification"
+                            timestamp={contract.blockchainTimestamp || contract.date}
+                            customColors={customColors}
+                          />
+                        )}
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>
@@ -1492,447 +1804,66 @@ export default function App() {
 
           {/* Settings Tab */}
           {activeTab === 'settings' && (
-            <div className="backdrop-blur-md rounded-2xl border shadow-2xl p-8"
-                 style={{ 
-                   backgroundColor: customColors.cardBackground, 
-                   borderColor: customColors.cardBorder 
-                 }}>
-              <div className="text-center mb-8">
-                <h2 className="text-3xl font-black mb-2" style={{ color: customColors.textPrimary }}>
-                  <svg className="w-8 h-8 inline-block mr-2" fill="currentColor" viewBox="0 0 20 20" style={{ color: customColors.primaryButton }}>
-                    <path fillRule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clipRule="evenodd"/>
-                  </svg>
-                  Settings
-                </h2>
-                <p className="text-lg" style={{ color: customColors.textSecondary }}>
-                  Customize your experience and manage your account
-                </p>
-                {isSavingSettings && (
-                  <p className="text-sm mt-2" style={{ color: customColors.primaryButton }}>
-                    💾 Auto-saving your changes...
-                  </p>
-                )}
-              </div>
+            <ThemeSettings
+              customColors={customColors}
+              setCustomColors={setCustomColors}
+              textSizes={textSizes}
+              setTextSizes={setTextSizes}
+              userPreferences={userPreferences}
+              setUserPreferences={setUserPreferences}
+              onSave={saveUserSettings}
+              onPasswordChange={() => setShowPasswordChange(true)}
+            />
+          )}
 
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                {/* Left Column - Profile & Security */}
-                <div className="space-y-6">
-                  {/* User Profile */}
+          {/* DocuSign iFrame Modal */}
+          {showDocuSignFrame && docuSignUrl && (
+            <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4">
+              <div className="bg-white rounded-lg shadow-2xl w-full max-w-6xl h-[90vh] flex flex-col">
+                {/* Header */}
+                <div className="flex items-center justify-between p-4 border-b">
                   <div>
-                    <h4 className="text-lg font-bold mb-4" style={{ color: customColors.textPrimary }}>Profile</h4>
-                    <div className="space-y-4">
-                      <div>
-                        <label className="block text-sm font-semibold mb-2" style={{ color: customColors.textSecondary }}>Email</label>
-                        <div className="p-3 rounded-xl border-2 font-semibold"
-                             style={{ 
-                               borderColor: customColors.cardBorder, 
-                               backgroundColor: customColors.cardBackground,
-                               color: customColors.textPrimary
-                             }}>
-                          {user?.email}
-                        </div>
-                      </div>
-                      <div>
-                        <label className="block text-sm font-semibold mb-2" style={{ color: customColors.textSecondary }}>Name</label>
-                        <div className="p-3 rounded-xl border-2 font-semibold"
-                             style={{ 
-                               borderColor: customColors.cardBorder, 
-                               backgroundColor: customColors.cardBackground,
-                               color: customColors.textPrimary
-                             }}>
-                          {user?.firstName} {user?.lastName}
-                        </div>
-                      </div>
-                    </div>
+                    <h3 className="text-lg font-bold text-gray-900">
+                      📝 Electronic Signature - DocuSign
+                    </h3>
+                    <p className="text-sm text-gray-600">
+                      Envelope ID: {envelopeId}
+                    </p>
                   </div>
-
-                  {/* Password Change */}
-                  <div>
-                    <h4 className="text-lg font-bold mb-4" style={{ color: customColors.textPrimary }}>Security</h4>
-                    <button
-                      onClick={() => setShowPasswordChange(true)}
-                      className="w-full px-4 py-3 rounded-xl font-semibold text-sm transition-all duration-200 hover:scale-105 flex items-center justify-center space-x-2"
-                      style={{ 
-                        backgroundColor: customColors.primaryButton,
-                        color: 'white'
-                      }}
-                    >
-                      <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                        <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd"/>
-                      </svg>
-                      <span>Change Password</span>
-                    </button>
-                  </div>
-
-                  {/* Email Integration */}
-                  <div>
-                    <h4 className="text-lg font-bold mb-4" style={{ color: customColors.textPrimary }}>Email Integration</h4>
-                    
-                    {!emailConnected ? (
-                      <div className="space-y-4">
-                        <div>
-                          <label className="block text-sm font-semibold mb-2" style={{ color: customColors.textSecondary }}>Email Provider</label>
-                          <select
-                            value={emailProvider}
-                            onChange={(e) => setEmailProvider(e.target.value)}
-                            className="w-full p-3 rounded-xl border-2 font-semibold"
-                            style={{ 
-                              borderColor: customColors.cardBorder, 
-                              backgroundColor: customColors.cardBackground,
-                              color: customColors.textPrimary
-                            }}
-                          >
-                            <option value="gmail">Gmail</option>
-                            <option value="outlook">Outlook</option>
-                          </select>
-                        </div>
-                        
-                        <button
-                          onClick={handleEmailConnection}
-                          className="w-full px-6 py-3 rounded-xl font-bold text-lg transition-all duration-200 hover:scale-105 flex items-center justify-center space-x-2"
-                          style={{ 
-                            backgroundColor: emailProvider === 'gmail' ? '#EA4335' : '#0078D4',
-                            color: 'white'
-                          }}
-                        >
-                          <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                            <path d="M2.003 5.884L10 9.882l7.997-3.998A2 2 0 0016 4H4a2 2 0 00-1.997 1.884z"/>
-                            <path d="M18 8.118l-8 4-8-4V14a2 2 0 002 2h12a2 2 0 002-2V8.118z"/>
-                          </svg>
-                          <span>{emailProvider === 'gmail' ? 'Connect Gmail' : 'Connect Outlook'}</span>
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="space-y-4">
-                        <div className="p-4 rounded-xl border"
-                             style={{ 
-                               backgroundColor: customColors.cardBackground, 
-                               borderColor: customColors.cardBorder 
-                             }}>
-                          <div className="flex items-center justify-between mb-3">
-                            <div>
-                              <p className="font-semibold" style={{ color: customColors.textPrimary }}>{emailAddress}</p>
-                              <p className="text-sm" style={{ color: customColors.textSecondary }}>Connected to {emailProvider}</p>
-                            </div>
-                            <span className="px-2 py-1 rounded-full text-xs font-bold"
-                                  style={{ 
-                                    backgroundColor: '#10B981',
-                                    color: 'white'
-                                  }}>
-                              Connected
-                            </span>
-                          </div>
-                          
-                          <button
-                            onClick={disconnectGmail}
-                            className="w-full px-4 py-2 rounded-lg font-semibold text-sm transition-all duration-200 hover:scale-105"
-                            style={{ 
-                              backgroundColor: '#EF4444',
-                              color: 'white'
-                            }}
-                          >
-                            Disconnect Gmail
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* User Preferences */}
-                  <div>
-                    <h4 className="text-lg font-bold mb-4" style={{ color: customColors.textPrimary }}>Preferences</h4>
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between">
-                        <span className="font-semibold" style={{ color: customColors.textSecondary }}>Auto-save notes</span>
-                        <button
-                          onClick={() => handlePreferenceChange('autoSave', !userPreferences.autoSave)}
-                          className={`w-12 h-6 rounded-full relative transition-colors duration-200 ${
-                            userPreferences.autoSave ? 'bg-blue-600' : 'bg-gray-600'
-                          }`}
-                        >
-                          <div className={`w-5 h-5 rounded-full bg-white absolute top-0.5 transition-transform duration-200 ${
-                            userPreferences.autoSave ? 'left-6' : 'left-0.5'
-                          }`}></div>
-                        </button>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <span className="font-semibold" style={{ color: customColors.textSecondary }}>Email notifications</span>
-                        <button
-                          onClick={() => handlePreferenceChange('emailNotifications', !userPreferences.emailNotifications)}
-                          className={`w-12 h-6 rounded-full relative transition-colors duration-200 ${
-                            userPreferences.emailNotifications ? 'bg-blue-600' : 'bg-gray-600'
-                          }`}
-                        >
-                          <div className={`w-5 h-5 rounded-full bg-white absolute top-0.5 transition-transform duration-200 ${
-                            userPreferences.emailNotifications ? 'left-6' : 'left-0.5'
-                          }`}></div>
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Right Column - Theme Customization */}
-                <div className="space-y-6">
-                  <h4 className="text-lg font-bold mb-4 flex items-center space-x-2" style={{ color: customColors.textPrimary }}>
-                    <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 20 20" style={{ color: customColors.primaryButton }}>
-                      <path fillRule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clipRule="evenodd"/>
+                  <button
+                    onClick={handleCloseDocuSignFrame}
+                    className="p-2 rounded-lg hover:bg-gray-100 transition-colors"
+                  >
+                    <svg className="w-6 h-6 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                     </svg>
-                    <span>Theme Customization</span>
-                  </h4>
-                  
-                  {/* Background Colors */}
-                  <div>
-                    <label className="block text-lg font-bold mb-3" style={{ color: customColors.textPrimary }}>Background Colors</label>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-sm font-semibold mb-2" style={{ color: customColors.textSecondary }}>Main Background</label>
-                        <input
-                          type="color"
-                          value={customColors.background}
-                          onChange={(e) => handleColorChange('background', e.target.value)}
-                          className="w-full h-12 rounded-xl border-2 cursor-pointer"
-                          style={{ borderColor: customColors.cardBorder }}
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-semibold mb-2" style={{ color: customColors.textSecondary }}>Card Background</label>
-                        <input
-                          type="color"
-                          value={customColors.cardBackground}
-                          onChange={(e) => handleColorChange('cardBackground', e.target.value)}
-                          className="w-full h-12 rounded-xl border-2 cursor-pointer"
-                          style={{ borderColor: customColors.cardBorder }}
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Button Colors */}
-                  <div>
-                    <label className="block text-lg font-bold mb-3" style={{ color: customColors.textPrimary }}>Button Colors</label>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-sm font-semibold mb-2" style={{ color: customColors.textSecondary }}>Primary Button</label>
-                        <input
-                          type="color"
-                          value={customColors.primaryButton}
-                          onChange={(e) => handleColorChange('primaryButton', e.target.value)}
-                          className="w-full h-12 rounded-xl border-2 cursor-pointer"
-                          style={{ borderColor: customColors.cardBorder }}
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-semibold mb-2" style={{ color: customColors.textSecondary }}>Secondary Button</label>
-                        <input
-                          type="color"
-                          value={customColors.secondaryButton}
-                          onChange={(e) => handleColorChange('secondaryButton', e.target.value)}
-                          className="w-full h-12 rounded-xl border-2 cursor-pointer"
-                          style={{ borderColor: customColors.cardBorder }}
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Text Colors */}
-                  <div>
-                    <label className="block text-lg font-bold mb-3" style={{ color: customColors.textPrimary }}>Text Colors</label>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-sm font-semibold mb-2" style={{ color: customColors.textSecondary }}>Primary Text</label>
-                        <input
-                          type="color"
-                          value={customColors.textPrimary}
-                          onChange={(e) => handleColorChange('textPrimary', e.target.value)}
-                          className="w-full h-12 rounded-xl border-2 cursor-pointer"
-                          style={{ borderColor: customColors.cardBorder }}
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-semibold mb-2" style={{ color: customColors.textSecondary }}>Secondary Text</label>
-                        <input
-                          type="color"
-                          value={customColors.textSecondary}
-                          onChange={(e) => handleColorChange('textSecondary', e.target.value)}
-                          className="w-full h-12 rounded-xl border-2 cursor-pointer"
-                          style={{ borderColor: customColors.cardBorder }}
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Text Sizes */}
-                  <div>
-                    <label className="block text-lg font-bold mb-3" style={{ color: customColors.textPrimary }}>Text Sizes</label>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-sm font-semibold mb-2" style={{ color: customColors.textSecondary }}>Email Body</label>
-                        <input
-                          type="text"
-                          value={textSizes.emailBody}
-                          onChange={(e) => handleTextSizeChange('emailBody', e.target.value)}
-                          className="w-full p-3 rounded-xl border-2 font-semibold"
-                          style={{ 
-                            borderColor: customColors.cardBorder, 
-                            backgroundColor: customColors.cardBackground,
-                            color: customColors.textPrimary
-                          }}
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-semibold mb-2" style={{ color: customColors.textSecondary }}>Subject</label>
-                        <input
-                          type="text"
-                          value={textSizes.subject}
-                          onChange={(e) => handleTextSizeChange('subject', e.target.value)}
-                          className="w-full p-3 rounded-xl border-2 font-semibold"
-                          style={{ 
-                            borderColor: customColors.cardBorder, 
-                            backgroundColor: customColors.cardBackground,
-                            color: customColors.textPrimary
-                          }}
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-semibold mb-2" style={{ color: customColors.textSecondary }}>Labels</label>
-                        <input
-                          type="text"
-                          value={textSizes.labels}
-                          onChange={(e) => handleTextSizeChange('labels', e.target.value)}
-                          className="w-full p-3 rounded-xl border-2 font-semibold"
-                          style={{ 
-                            borderColor: customColors.cardBorder, 
-                            backgroundColor: customColors.cardBackground,
-                            color: customColors.textPrimary
-                          }}
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Preset Themes */}
-                  <div>
-                    <label className="block text-lg font-bold mb-3" style={{ color: customColors.textPrimary }}>Quick Themes</label>
-                    <div className="grid grid-cols-2 gap-3">
-                      <button
-                        onClick={() => setCustomColors({
-                          background: '#0B1F33',
-                          cardBackground: 'rgba(255, 255, 255, 0.1)',
-                          cardBorder: 'rgba(255, 255, 255, 0.2)',
-                          primaryButton: '#1E85F2',
-                          secondaryButton: '#10B981',
-                          textPrimary: '#F8EEDB',
-                          textSecondary: '#9CA3AF'
-                        })}
-                        className="px-4 py-3 rounded-xl font-semibold text-sm transition-all duration-200 hover:scale-105"
-                        style={{ 
-                          backgroundColor: '#0B1F33',
-                          color: '#F8EEDB',
-                          border: '2px solid #1E85F2'
-                        }}
-                      >
-                        🌙 Dark Blue
-                      </button>
-                      <button
-                        onClick={() => setCustomColors({
-                          background: '#1F2937',
-                          cardBackground: 'rgba(255, 255, 255, 0.05)',
-                          cardBorder: 'rgba(255, 255, 255, 0.1)',
-                          primaryButton: '#8B5CF6',
-                          secondaryButton: '#EC4899',
-                          textPrimary: '#F9FAFB',
-                          textSecondary: '#D1D5DB'
-                        })}
-                        className="px-4 py-3 rounded-xl font-semibold text-sm transition-all duration-200 hover:scale-105"
-                        style={{ 
-                          backgroundColor: '#1F2937',
-                          color: '#F9FAFB',
-                          border: '2px solid #8B5CF6'
-                        }}
-                      >
-                        💜 Purple
-                      </button>
-                      <button
-                        onClick={() => setCustomColors({
-                          background: '#064E3B',
-                          cardBackground: 'rgba(255, 255, 255, 0.08)',
-                          cardBorder: 'rgba(255, 255, 255, 0.15)',
-                          primaryButton: '#059669',
-                          secondaryButton: '#10B981',
-                          textPrimary: '#ECFDF5',
-                          textSecondary: '#A7F3D0'
-                        })}
-                        className="px-4 py-3 rounded-xl font-semibold text-sm transition-all duration-200 hover:scale-105"
-                        style={{ 
-                          backgroundColor: '#064E3B',
-                          color: '#ECFDF5',
-                          border: '2px solid #059669'
-                        }}
-                      >
-                        🌿 Emerald
-                      </button>
-                      <button
-                        onClick={() => setCustomColors({
-                          background: '#7C2D12',
-                          cardBackground: 'rgba(255, 255, 255, 0.08)',
-                          cardBorder: 'rgba(255, 255, 255, 0.15)',
-                          primaryButton: '#EA580C',
-                          secondaryButton: '#F59E0B',
-                          textPrimary: '#FEF3C7',
-                          textSecondary: '#FDE68A'
-                        })}
-                        className="px-4 py-3 rounded-xl font-semibold text-sm transition-all duration-200 hover:scale-105"
-                        style={{ 
-                          backgroundColor: '#7C2D12',
-                          color: '#FEF3C7',
-                          border: '2px solid #EA580C'
-                        }}
-                      >
-                        🧡 Sunset
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Reset Button */}
-                  <div className="pt-4 border-t" style={{ borderColor: customColors.cardBorder }}>
-                    <div className="space-y-3">
-                      <button
-                        onClick={handleManualSave}
-                        disabled={isSavingSettings}
-                        className="w-full px-6 py-3 rounded-xl font-bold text-lg transition-all duration-200 hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
-                        style={{ 
-                          backgroundColor: customColors.primaryButton,
-                          color: 'white'
-                        }}
-                      >
-                        <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                          <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd"/>
-                        </svg>
-                        <span>{isSavingSettings ? 'Saving...' : 'Save Settings'}</span>
-                      </button>
-                      <button
-                        onClick={() => setCustomColors({
-                          background: '#0B1F33',
-                          cardBackground: 'rgba(255, 255, 255, 0.1)',
-                          cardBorder: 'rgba(255, 255, 255, 0.2)',
-                          primaryButton: '#1E85F2',
-                          secondaryButton: '#10B981',
-                          textPrimary: '#F8EEDB',
-                          textSecondary: '#9CA3AF'
-                        })}
-                        className="w-full px-6 py-3 rounded-xl font-bold text-lg transition-all duration-200 hover:scale-105 flex items-center justify-center space-x-2"
-                        style={{ 
-                          backgroundColor: '#EF4444',
-                          color: 'white'
-                        }}
-                      >
-                        <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                          <path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd"/>
-                        </svg>
-                        <span>Reset to Default</span>
-                      </button>
-                    </div>
+                  </button>
+                </div>
+                
+                {/* iFrame Container */}
+                <div className="flex-1 p-4">
+                  <iframe 
+                    src={docuSignUrl} 
+                    width="100%" 
+                    height="100%" 
+                    frameBorder="0"
+                    title="DocuSign Electronic Signature"
+                    className="rounded-lg border"
+                  />
+                </div>
+                
+                {/* Footer */}
+                <div className="p-4 border-t bg-gray-50">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm text-gray-600">
+                      Client: {clientName} ({clientEmail})
+                    </p>
+                    <button
+                      onClick={handleCloseDocuSignFrame}
+                      className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                    >
+                      Close
+                    </button>
                   </div>
                 </div>
               </div>

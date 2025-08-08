@@ -1,0 +1,29 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>AgentHub Extension Settings</title>
+    <style>
+      :root{--bg:#0a0f1a;--panel:rgba(255,255,255,.06);--border:rgba(255,255,255,.12);--text:#e2e8f0;--muted:#94a3b8;--primary:#2563eb}
+      body{background:var(--bg);color:var(--text);font:14px/1.4 system-ui;padding:24px}
+      .card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:16px;max-width:560px}
+      label{display:block;color:var(--muted);margin:8px 0}
+      input{width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--text)}
+      .btn{border:1px solid var(--border);background:var(--primary);color:#fff;padding:8px 10px;border-radius:10px;cursor:pointer;margin-top:10px}
+    </style>
+    <script type="module" crossorigin src="/options.js"></script>
+    <link rel="modulepreload" crossorigin href="/assets/modulepreload-polyfill-B5Qt9EMX.js">
+  </head>
+  <body>
+    <div class="card">
+      <h2>Supabase Configuration</h2>
+      <label>SUPABASE_URL <input id="url" placeholder="https://xyzcompany.supabase.co"></label>
+      <label>SUPABASE_ANON_KEY <input id="key" placeholder="ey..."/></label>
+      <button id="save" class="btn">Save</button>
+      <div id="status" style="opacity:.8;margin-top:8px"></div>
+    </div>
+  </body>
+  </html>
+
+

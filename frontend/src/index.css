@@ -54,4 +54,101 @@ code {
 input:focus, textarea:focus, select:focus {
   outline: none;
   box-shadow: 0 0 0 3px rgba(30, 133, 242, 0.3);
+}
+
+/* Animated Contract Flow Animations */
+@keyframes slideInFromBottom {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideInFromTop {
+  from {
+    opacity: 0;
+    transform: translateY(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes fadeOut {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes scaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Step transition animations */
+.step-enter {
+  animation: slideInFromBottom 0.5s ease-in-out;
+}
+
+.step-exit {
+  animation: fadeOut 0.3s ease-in-out;
+}
+
+/* Progress bar animations */
+.progress-step-active {
+  animation: scaleIn 0.3s ease-in-out;
+}
+
+/* Liquid glass hover effects */
+.liquid-glass-hover {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.liquid-glass-hover:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+  backdrop-filter: blur(20px);
+}
+
+/* Smooth scroll behavior */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Enhanced button animations */
+.btn-animate {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.btn-animate:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.15);
+}
+
+.btn-animate:active {
+  transform: translateY(0);
+  box-shadow: 0 5px 10px rgba(0, 0, 0, 0.1);
 } 
