@@ -6,9 +6,11 @@ import BlockchainInfo from './components/BlockchainInfo';
 import DocuSignConsent from './components/DocuSignConsent';
 import AnimatedContractFlow from './components/AnimatedContractFlow';
 import AgentDashboard from './components/AgentDashboard';
+import ChatCopilot from './components/ChatCopilot';
 import ContractsPage from './components/ContractsPage';
 import BlockchainTracker from './components/BlockchainTracker';
 import ThemeSettings from './components/ThemeSettings';
+import ConversationalFlows from './components/ConversationalFlows';
 import { generateJurisdictions } from './statesData';
 import { logToBlockchain } from './utils/blockchain';
 import { getSupabaseClient, supaGetSession, supaSignInWithPassword, supaListUserExtracts, supaDownloadJson } from './utils/supabase';
@@ -21,7 +23,7 @@ export default function App() {
   const [token, setToken] = useState(null);
 
   // Tab management
-  const [activeTab, setActiveTab] = useState('dashboard'); // 'dashboard', 'clients', 'contracts', 'ledger', 'settings'
+  const [activeTab, setActiveTab] = useState('dashboard'); // 'dashboard', 'clients', 'contracts', 'flows', 'ledger', 'settings'
 
   // App states
   const [loading, setLoading] = useState(false);
@@ -124,13 +126,68 @@ export default function App() {
   const [processingDocuSign, setProcessingDocuSign] = useState(false);
   const [envelopeId, setEnvelopeId] = useState('');
 
-  // Sample clients for dropdown
+  // Copilot states
+  const [copilotOpen, setCopilotOpen] = useState(false);
+  const [selectedCopilotClient, setSelectedCopilotClient] = useState(null);
+  const [selectedMainClient, setSelectedMainClient] = useState('client1'); // Track main nav client selection
+
+  // Sample clients for dropdown - Updated to match Google Sheets data
   const clients = [
-    { id: 'client1', name: 'Sarah Johnson' },
-    { id: 'client2', name: 'Mike Chen' },
-    { id: 'client3', name: 'Emily Rodriguez' },
-    { id: 'client4', name: 'David Thompson' },
-    { id: 'client5', name: 'Lisa Wang' }
+    { 
+      id: 'client1', 
+      name: 'Sam Johnson', 
+      email: 'sam.johnson@email.com',
+      budget: '$400,000 - $500,000',
+      stage: 'Active buyer',
+      city: 'Austin',
+      timeline: '3-4 months',
+      preferences: 'Looking for 3-4 bedroom home with modern kitchen',
+      follow_up_notes: 'Sam showed strong interest in the Lakeway property we viewed last Tuesday. He particularly liked the kitchen renovation and the backyard space. His wife Sarah seemed hesitant about the commute to downtown. Need to follow up with properties closer to the tech corridor. He mentioned budget flexibility if we find the right home. Next step: Send him listings in Cedar Park and Round Rock areas.'
+    },
+    { 
+      id: 'client2', 
+      name: 'Casey Martinez', 
+      email: 'casey.martinez@email.com',
+      budget: '$600,000 - $750,000',
+      stage: 'Under contract',
+      city: 'Dallas',
+      timeline: '2-3 months',
+      preferences: 'Prefers contemporary style with pool',
+      follow_up_notes: 'Casey is currently under contract for the Preston Hollow property. Inspection is scheduled for next Friday. He expressed concerns about the roof condition during our last call. Recommend connecting him with our preferred roofing contractor for a pre-inspection estimate. Also need to coordinate with his lender for appraisal scheduling. His timeline is tight due to job relocation.'
+    },
+    { 
+      id: 'client3', 
+      name: 'Riley Davis', 
+      email: 'riley.davis@email.com',
+      budget: '$350,000 - $450,000',
+      stage: 'Prospecting',
+      city: 'Houston',
+      timeline: '6 months',
+      preferences: 'First-time buyer, needs move-in ready home',
+      follow_up_notes: 'Riley just got pre-approved for $425K with excellent credit. She needs education on the home buying process and neighborhood comparisons. Very interested in Katy area for schools but concerned about flooding. Schedule a buyer consultation and send first-time buyer packet. She prefers virtual tours initially and has weekends available for showings.'
+    },
+    { 
+      id: 'client4', 
+      name: 'Taylor Patel', 
+      email: 'taylor.patel@email.com',
+      budget: '$800,000 - $950,000',
+      stage: 'Closing',
+      city: 'San Antonio',
+      timeline: '1 month',
+      preferences: 'Luxury home with office space',
+      follow_up_notes: 'Taylor is closing on the Stone Oak luxury home next Tuesday. Final walkthrough scheduled for Monday morning. He requested recommendations for interior designers and smart home installation services. Also interested in property management options for his current home conversion to rental. Follow up with referral list and closing gift ideas.'
+    },
+    { 
+      id: 'client5', 
+      name: 'Logan Lopez', 
+      email: 'logan.lopez@email.com',
+      budget: '$250,000 - $350,000',
+      stage: 'Qualified',
+      city: 'Fort Worth',
+      timeline: '4-5 months',
+      preferences: 'Looking for starter home in good school district',
+      follow_up_notes: 'Logan is a young professional looking for his first home. Very budget-conscious and focused on resale value. Prefers Fort Worth ISD area and needs to be within 30 minutes of downtown. He drives a lot for work so garage parking is important. Send him market analysis for targeted neighborhoods and schedule showing for this weekend.'
+    }
   ];
 
   // All US States and Territories with contract documents
@@ -149,6 +206,14 @@ export default function App() {
       loadUserSettings();
     }
   }, []);
+
+  // Sync selectedMainClient with clientId on app load
+  useEffect(() => {
+    if (clientId && clientId !== selectedMainClient) {
+      setSelectedMainClient(clientId);
+      setSelectedCopilotClient(clientId);
+    }
+  }, [clientId]);
 
   // Load contract history when switching to history tab
   useEffect(() => {
@@ -961,8 +1026,12 @@ export default function App() {
                   Client:
                 </span>
                 <select
-                  value={clientId}
-                  onChange={(e) => setClientId(e.target.value)}
+                  value={selectedMainClient}
+                  onChange={(e) => {
+                    setSelectedMainClient(e.target.value);
+                    setSelectedCopilotClient(e.target.value); // Sync with chatbot
+                    setClientId(e.target.value);
+                  }}
                   className="px-4 py-2 rounded-lg text-sm border shadow-sm bg-transparent"
                   style={{ 
                     backgroundColor: 'transparent',
@@ -1039,6 +1108,20 @@ export default function App() {
                   <span>Contracts</span>
                 </button>
                 <button
+                  onClick={() => setActiveTab('flows')}
+                  className={`px-4 py-2 rounded-md font-bold transition-all duration-200 flex items-center space-x-2 ${
+                    activeTab === 'flows' ? 'text-white' : 'text-gray-200 hover:text-white'
+                  }`}
+                  style={{ 
+                    backgroundColor: activeTab === 'flows' ? customColors.primaryButton : 'transparent'
+                  }}
+                >
+                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M7 2a1 1 0 00-.707 1.707L7 4.414v3.758a1 1 0 01-.293.707l-4 4C.817 14.769 2.156 18 4.828 18h10.343c2.673 0 4.012-3.231 2.122-5.121l-4-4A1 1 0 0113 8.172V4.414l.707-.707A1 1 0 0013 2H7zm2 6.172V4h2v4.172a3 3 0 00.879 2.12l1.027 1.028a4 4 0 00-2.171.102l-.47.156a4 4 0 01-2.53 0l-.563-.187a1.993 1.993 0 00-.169-.712v-.001z" clipRule="evenodd"/>
+                  </svg>
+                  <span>AI Flows</span>
+                </button>
+                <button
                   onClick={() => setActiveTab('ledger')}
                   className={`px-4 py-2 rounded-md font-bold transition-all duration-200 flex items-center space-x-2 ${
                     activeTab === 'ledger' ? 'text-white' : 'text-gray-2 00 hover:text-white'
@@ -1078,7 +1161,7 @@ export default function App() {
       )}
 
       {/* Main Content */}
-      <div className={`px-6 pb-6 ${activeTab === 'dashboard' ? '' : 'pt-24'}`}>
+      <div className={`px-6 pb-6 transition-all duration-300 ${activeTab === 'dashboard' ? '' : 'pt-24'} ${copilotOpen ? 'mr-96' : ''}`}>
         <div className="max-w-6xl mx-auto">
           {/* Main Dashboard Tab */}
           {activeTab === 'dashboard' && !showPathwayInterface && (
@@ -1622,6 +1705,13 @@ export default function App() {
             />
           )}
 
+          {/* AI Flows Tab */}
+          {activeTab === 'flows' && (
+            <ConversationalFlows
+              token={token}
+            />
+          )}
+
           {/* History Tab */}
           {activeTab === 'history_disabled' && (
             <div className="backdrop-blur-md rounded-2xl border shadow-2xl p-8"
@@ -1870,6 +1960,24 @@ export default function App() {
             </div>
           )}
         </div>
+        {/* Floating Copilot Chat */}
+        {isAuthenticated && (
+          <ChatCopilot 
+            token={token} 
+            user={user}
+            clients={clients}
+            clientId={clientId} 
+            customColors={customColors}
+            copilotOpen={copilotOpen}
+            setCopilotOpen={setCopilotOpen}
+            selectedMainClient={selectedMainClient}
+            onClientSelect={(clientId) => {
+              setSelectedMainClient(clientId);
+              setSelectedCopilotClient(clientId);
+              setClientId(clientId);
+            }}
+          />
+        )}
       </div>
     </div>
   );

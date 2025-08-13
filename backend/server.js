@@ -1,6 +1,8 @@
+require('dotenv').config({ path: require('path').join(__dirname, '.env') });
 const express = require('express');
 const cors = require('cors');
 const { createClient } = require('@supabase/supabase-js');
+const { generateAssistantPlan } = require('./chat-intent');
 const OpenAI = require('openai');
 const axios = require('axios');
 const multer = require('multer');
@@ -32,9 +34,13 @@ app.use(cors({
     const allowed = ['http://localhost:3000', 'http://localhost:3004'];
     // Allow requests from Chrome extensions and same-origin/undefined (like curl, Postman)
     const isExtension = typeof origin === 'string' && origin.startsWith('chrome-extension://');
-    if (!origin || isExtension || allowed.includes(origin)) {
+    // Be more permissive in development
+    const isDevelopment = process.env.NODE_ENV !== 'production';
+    
+    if (!origin || isExtension || allowed.includes(origin) || (isDevelopment && origin?.includes('localhost'))) {
       return callback(null, true);
     }
+    console.warn('CORS blocked origin:', origin);
     return callback(new Error('Not allowed by CORS'));
   },
   credentials: true
@@ -79,6 +85,316 @@ const storage = multer.diskStorage({
   }
 });
 
+// --- New Endpoint: Follow-up generation from Google Sheet (Column Y) ---
+app.get('/api/followup/from-sheet', authenticateToken, async (req, res) => {
+  try {
+    const { clientName } = req.query;
+    if (!clientName) return res.status(400).json({ success: false, error: 'clientName query param required' });
+    const rows = await fetchSheetValues();
+    const { notes, city, meta } = extractFollowUpNotes(rows, clientName);
+    if (!notes) return res.status(404).json({ success: false, error: 'No follow-up notes found for client', meta });
+    if (!openai) {
+      return res.json({ success: true, subject: `Following up, ${clientName}`, body: notes, rawNotes: notes, city, meta, fallback: true });
+    }
+    const systemPrompt = 'You are a friendly, professional real estate agent assistant. Turn internal raw follow-up notes into a concise, personable email (2-3 short paragraphs) with a clear next step. Maintain factual accuracy. Include ONE brief sentence referencing current market conditions in the client\'s city if provided (inventory trend, days-on-market, pricing direction) WITHOUT fabricating numbers. Avoid the exact phrase "Let me know what you would like to do next." and instead offer a specific next action.';
+    const cityLine = city ? `Client City: ${city}` : 'Client City: (not provided)';
+    const userPrompt = `Client Name: ${clientName}\n${cityLine}\nRaw Internal Follow-Up Notes:\n"""\n${notes}\n"""\n\nReturn ONLY valid JSON with keys subject and body.`;
+    const completion = await openai.chat.completions.create({
+      model: process.env.OPENAI_TEXT_MODEL || 'gpt-4o-mini',
+      messages: [ { role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt } ],
+      temperature: 0.65,
+      max_tokens: 500
+    });
+    let subject = `Follow up, ${clientName}`;
+    let body = notes;
+    try {
+      const raw = completion.choices?.[0]?.message?.content || '';
+      const jsonMatch = raw.match(/\{[\s\S]*\}/);
+      const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : raw);
+      subject = parsed.subject || subject;
+      body = parsed.body || body;
+    } catch (e) {
+      body = completion.choices?.[0]?.message?.content || body;
+    }
+  body = sanitizeFollowUp(body);
+  res.json({ success: true, subject, body, rawNotes: notes, city, meta });
+  } catch (error) {
+    console.error('followup/from-sheet error:', error);
+    const hint = /Missing GOOGLE_SHEETS_SHEET_ID/i.test(error.message) || /No Google Sheets credentials/i.test(error.message)
+      ? 'Add GOOGLE_SHEETS_SHEET_ID and either GOOGLE_SERVICE_ACCOUNT_EMAIL + GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY (with escaped newlines) or GOOGLE_SHEETS_API_KEY to backend .env then restart.'
+      : '';
+    res.status(500).json({ success: false, error: 'Failed to generate follow-up from sheet', details: error.message, hint });
+  }
+});
+
+// Refine previously generated follow-up email with an instruction (e.g., "make it more professional")
+app.post('/api/followup/refine', authenticateToken, async (req, res) => {
+  try {
+    const { currentBody, instruction } = req.body;
+    if (!currentBody || !instruction) return res.status(400).json({ success: false, error: 'currentBody and instruction required' });
+    if (!openai) return res.json({ success: true, refinedBody: currentBody, note: 'AI disabled' });
+    const systemPrompt = 'You are a real estate agent email editor. Apply the user instruction to adjust tone/style while preserving factual content and client specifics. Do NOT introduce new facts. Never end with the exact phrase "Let me know what you would like to do next."';
+    const userPrompt = `Original Email Body:\n"""\n${currentBody}\n"""\n\nInstruction: ${instruction}\n\nReturn ONLY the revised email body (no JSON).`;
+    const completion = await openai.chat.completions.create({
+      model: process.env.OPENAI_TEXT_MODEL || 'gpt-4o-mini',
+      messages: [ { role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt } ],
+      temperature: 0.5,
+      max_tokens: 500
+    });
+  let refined = completion.choices?.[0]?.message?.content?.trim() || currentBody;
+  refined = sanitizeFollowUp(refined);
+  res.json({ success: true, refinedBody: refined });
+  } catch (error) {
+    console.error('followup/refine error:', error);
+    res.status(500).json({ success: false, error: 'Failed to refine follow-up', details: error.message });
+  }
+});
+
+// Helper: fetch Google Sheet values (A:Y) using either service account or API key
+async function fetchSheetValues() {
+  const sheetId = process.env.GOOGLE_SHEETS_SHEET_ID;
+  if (!sheetId) throw new Error('Missing GOOGLE_SHEETS_SHEET_ID');
+  // Extend default range to AC to include city (Column AC)
+  const range = process.env.GOOGLE_SHEETS_RANGE || 'Sheet1!A:AC';
+
+  // Prefer service account credentials if provided
+  const saEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
+  const saKey = process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY && process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY.replace(/\\n/g, '\n');
+  if (saEmail && saKey) {
+    const jwt = new google.auth.JWT(saEmail, null, saKey, ['https://www.googleapis.com/auth/spreadsheets.readonly']);
+    await jwt.authorize();
+    const sheets = google.sheets({ version: 'v4', auth: jwt });
+    const resp = await sheets.spreadsheets.values.get({ spreadsheetId: sheetId, range });
+    return resp.data.values || [];
+  }
+
+  // Fallback to simple API key access (public sheet required)
+  const apiKey = process.env.GOOGLE_SHEETS_API_KEY;
+  if (!apiKey) throw new Error('No Google Sheets credentials (service account or GOOGLE_SHEETS_API_KEY) provided');
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent(range)}?key=${apiKey}`;
+  const { data } = await axios.get(url);
+  return data.values || [];
+}
+
+// Helper: extract follow-up notes for a given client name (case-insensitive) from Column Y
+function extractFollowUpNotes(rows, clientName) {
+  if (!Array.isArray(rows) || rows.length === 0) return { notes: null, meta: { reason: 'empty_sheet' } };
+  const header = rows[0].map(h => (h || '').toString().trim());
+  const firstNameIdx = header.findIndex(h => /^name_first$/i.test(h));
+  const lastNameIdx = header.findIndex(h => /^name_last$/i.test(h));
+  const fullNameIdx = header.findIndex(h => /^name$/i.test(h));
+  const notesIdx = header.findIndex(h => /^notes$/i.test(h));
+  const cityIdx = header.findIndex(h => /^city$/i.test(h));
+  const targetName = clientName.toLowerCase();
+  let matchedRow = null;
+  for (let i = 1; i < rows.length; i++) {
+    const row = rows[i];
+    const first = (row[firstNameIdx] || '').toString().trim();
+    const last = (row[lastNameIdx] || '').toString().trim();
+    const combined = (first && last) ? `${first} ${last}` : (row[fullNameIdx] || '').toString().trim();
+    if (combined && combined.toLowerCase().includes(targetName)) {
+      matchedRow = row;
+      break;
+    }
+  }
+  if (!matchedRow) return { notes: null, meta: { reason: 'client_not_found', searched: clientName } };
+  const notes = notesIdx !== -1 ? (matchedRow[notesIdx] || '').toString().trim() : '';
+  const city = cityIdx !== -1 ? (matchedRow[cityIdx] || '').toString().trim() : '';
+  return { notes: notes || null, city: city || null, meta: { firstNameIdx, lastNameIdx, fullNameIdx, notesIdx, cityIdx } };
+}
+
+// Post-process follow-up email body: remove generic closing phrase and enforce a more specific CTA
+function sanitizeFollowUp(text) {
+  if (!text) return text;
+  let cleaned = text.replace(/Let me know what you would like to do next\.?/gi, '').trim();
+  // Collapse extra blank lines created by removal
+  cleaned = cleaned.replace(/\n{3,}/g, '\n\n');
+  // If no obvious call-to-action remains, append one
+  const hasCTA = /(schedule|call|tour|see|review|chat|update|next step)/i.test(cleaned);
+  if (!hasCTA) {
+    cleaned += `\n\nWould you like to schedule a quick call this week to review options or set up showings?`;
+  }
+  return cleaned.trim();
+}
+
+// Build a key-value mapping for a row by header names
+function mapRow(header, row) {
+  const obj = {};
+  header.forEach((h, i) => {
+    const key = (h || '').toString().trim();
+    if (key) obj[key] = row[i] || '';
+  });
+  return obj;
+}
+
+// Find full sheet row for a client
+function findClientSheetRow(rows, clientName) {
+  if (!Array.isArray(rows) || rows.length < 2) return null;
+  const header = rows[0].map(h => (h || '').toString().trim());
+  const firstNameIdx = header.findIndex(h => /^name_first$/i.test(h));
+  const lastNameIdx = header.findIndex(h => /^name_last$/i.test(h));
+  const fullNameIdx = header.findIndex(h => /^name$/i.test(h));
+  const targetLower = clientName.toLowerCase();
+  for (let i = 1; i < rows.length; i++) {
+    const row = rows[i];
+    const first = (row[firstNameIdx] || '').toString().trim();
+    const last = (row[lastNameIdx] || '').toString().trim();
+    const combined = (first && last) ? `${first} ${last}` : (row[fullNameIdx] || '').toString().trim();
+    if (combined && combined.toLowerCase() === targetLower) {
+      return { header, rowObject: mapRow(header, row) };
+    }
+  }
+  // fallback contains
+  for (let i = 1; i < rows.length; i++) {
+    const row = rows[i];
+    const first = (row[firstNameIdx] || '').toString().trim();
+    const last = (row[lastNameIdx] || '').toString().trim();
+    const combined = (first && last) ? `${first} ${last}` : (row[fullNameIdx] || '').toString().trim();
+    if (combined && combined.toLowerCase().includes(targetLower)) {
+      return { header, rowObject: mapRow(header, row) };
+    }
+  }
+  return null;
+}
+
+// Client-specific QA endpoint using Google Sheet row context
+app.post('/api/client/qa', authenticateToken, async (req, res) => {
+  try {
+    const { clientName, question, history = [] } = req.body;
+    if (!clientName || !question) return res.status(400).json({ success: false, error: 'clientName and question required' });
+    if (!openai) return res.json({ success: true, reply: 'AI unavailable (missing OPENAI_API_KEY).' });
+    const rows = await fetchSheetValues();
+    const match = findClientSheetRow(rows, clientName);
+    if (!match) return res.status(404).json({ success: false, error: 'Client not found in sheet' });
+    const { rowObject } = match;
+    const redacted = { ...rowObject };
+    // Optionally redact PII fields if needed later
+    const contextLines = Object.entries(redacted)
+      .filter(([k,v]) => v && typeof v === 'string')
+      .map(([k,v]) => `${k}: ${v}`)
+      .join('\n');
+    const systemPrompt = `You are a real estate assistant. Answer questions ONLY about this single client using the provided structured data and notes. If the answer is not present, say you don't have that information. Be concise.`;
+    const messages = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: `CLIENT DATA:\n${contextLines}\n\nQUESTION: ${question}` }
+    ];
+    // Include short history (last 3 Q/A pairs) for continuity
+    history.slice(-6).forEach(m => {
+      if (m.role === 'user' || m.role === 'assistant') messages.push({ role: m.role, content: m.content });
+    });
+    const completion = await openai.chat.completions.create({
+      model: process.env.OPENAI_TEXT_MODEL || 'gpt-4o-mini',
+      messages,
+      temperature: 0.89,
+      max_tokens: 400
+    });
+    const reply = completion.choices?.[0]?.message?.content?.trim() || 'No response';
+    res.json({ success: true, reply });
+  } catch (error) {
+    console.error('client/qa error:', error);
+    res.status(500).json({ success: false, error: 'Client QA failed', details: error.message });
+  }
+});
+
+// Hybrid client chat endpoint: answer ANY questions about or for the client using sheet data as grounding, falling back to general real estate knowledge while tailoring to the client.
+app.post('/api/client/chat', authenticateToken, async (req, res) => {
+  try {
+    const { clientName, question, history = [] } = req.body;
+    if (!clientName || !question) return res.status(400).json({ success: false, error: 'clientName and question required' });
+    if (!openai) return res.json({ success: true, reply: 'AI unavailable (missing OPENAI_API_KEY).' });
+    const rows = await fetchSheetValues();
+    const match = findClientSheetRow(rows, clientName);
+    const contextObj = match ? match.rowObject : {};
+    const contextLines = Object.entries(contextObj)
+      .filter(([k,v]) => v && typeof v === 'string')
+      .map(([k,v]) => `${k}: ${v}`)
+      .join('\n');
+    // -------- Intent Detection (simple heuristic) --------
+    const lowerQ = question.toLowerCase();
+    const intents = [];
+    if (/(draft|write|prepare).*offer/.test(lowerQ) || /offer draft/.test(lowerQ)) intents.push('DRAFT_OFFER');
+    if (/next steps?|what should i do|plan|strategy/.test(lowerQ)) intents.push('NEXT_STEPS');
+    if (/follow[- ]?up/.test(lowerQ) && !/(generate|latest)/.test(lowerQ)) intents.push('FOLLOW_UP_EMAIL');
+    if (/checklist|list of tasks|to-?do/.test(lowerQ)) intents.push('CHECKLIST');
+    if (/refine|improve|more professional|friendlier|shorter|longer|more detailed/.test(lowerQ)) intents.push('REFINEMENT');
+
+    // Extract possible offer fields from question (very lightweight parsing)
+    const priceMatch = question.match(/\$?([0-9]{3,}(?:[,0-9]{3})*(?:\.[0-9]{1,2})?)/);
+    const earnestMatch = question.match(/earnest[^0-9$]*\$?([0-9]{2,}(?:[,0-9]{3})*)/i);
+    const closingDateMatch = question.match(/closing (?:on |date |by )?(\w+ \d{1,2}, \d{4}|\d{1,2}\/\d{1,2}\/\d{2,4}|\w+ \d{1,2})/i);
+    const contingencies = [];
+    if (/finance|financing/i.test(question)) contingencies.push('Financing');
+    if (/inspection/i.test(question)) contingencies.push('Inspection');
+    if (/appraisal/i.test(question)) contingencies.push('Appraisal');
+    if (/sale of (?:current|existing) home/i.test(question)) contingencies.push('Sale of current home');
+
+    const offerData = {
+      price: priceMatch ? priceMatch[1] : null,
+      earnestMoney: earnestMatch ? earnestMatch[1] : null,
+      closingDate: closingDateMatch ? closingDateMatch[1] : null,
+      contingencies
+    };
+    const missingOfferFields = [];
+    if (intents.includes('DRAFT_OFFER')) {
+      ['price','earnestMoney','closingDate'].forEach(f => { if (!offerData[f]) missingOfferFields.push(f); });
+    }
+
+  const systemPrompt = `ROLE: You are an advanced, strategic real estate copilot helping an agent with one specific client. Provide COMPLETE, USEFUL, PROACTIVE answers – not just terse facts. Always add thoughtful, actionable insight while staying within factual boundaries.\n\nCORE CAPABILITIES:\n1. Direct factual answers from CLIENT_DATA\n2. Strategic guidance & next steps planning\n3. Offer drafting (skeletal or detailed) with placeholders when data missing\n4. Checklists & process frameworks\n5. Follow-up email drafting & refinement\n6. Risk / issue spotting and mitigation suggestions\n7. Summarization + insight extraction from prior turns (if provided)\n\nDATA RELIABILITY RULES:\n- Cite only exact known client facts from CLIENT_DATA.\n- If a detail is missing (budget, city, timeline, etc.) explicitly note it and use a placeholder like ALL_CAPS_PLACEHOLDER.\n- Market commentary must remain qualitative unless user provides numbers. Do NOT fabricate statistics.\n\nOUTPUT FRAME (adapt as relevant – omit empty sections):\n**Direct Answer** – Clear, specific response to the immediate user request.\n**Context / Reasoning** – (1–3 short sentences) Why this matters or how it ties to client situation.\n**Recommended Next Steps** – Numbered (max 5) if action is implied.\n**Offer Draft** – If drafting an offer (include Summary, Key Terms, Contingencies, Open Inputs). Use ALL_CAPS placeholders where data missing.\n**Checklist** – Grouped (Preparation / Documentation / Communication) when a list is requested.\n**Email Draft** – For follow-up email requests: 2 short paragraphs + a single, specific CTA. NEVER use the phrase "Let me know what you would like to do next."\n**Missing Info Needed** – List only if gaps block precision.\n\nINTENT RULES:\n- DRAFT_OFFER: Provide list of missing required fields FIRST if any, then skeleton with placeholders.\n- NEXT_STEPS: Provide prioritized numbered list (max 5).\n- CHECKLIST: Actionable bullets grouped.\n- FOLLOW_UP_EMAIL: Friendly, professional, personalized; city market note only if city known.\n- REFINEMENT: State change applied then revised content.\n\nSTYLE & TONE:\n- Professional, warm, efficient. Provide value-added strategic reasoning.\n- Prefer specificity over vagueness.\n- Never instruct to "log an event".\n- Use placeholders over guessing (ALL_CAPS).\n- If producing a draft that could be construed as legal, add: "(Non-binding draft – agent/legal review required)."\n\nFAIL-SAFE:\nIf the request is ambiguous, briefly state assumptions and proceed rather than asking an immediate clarifying question—unless executing without clarity risks a major misunderstanding (e.g., contract legal terms).\n`;
+    let dynamicInstruction = '';
+    if (intents.length) {
+      dynamicInstruction += `INTENTS DETECTED: ${intents.join(', ')}\n`;
+    }
+    if (intents.includes('DRAFT_OFFER')) {
+      dynamicInstruction += `OFFER_DATA_PARSED: ${JSON.stringify(offerData)}\n`;
+      if (missingOfferFields.length) {
+        dynamicInstruction += `MISSING_OFFER_FIELDS: ${missingOfferFields.join(', ')}\n`;
+      }
+    }
+
+    const taskUserBlock = `${dynamicInstruction}USER_REQUEST:\n${question}`;
+    const messages = [ { role: 'system', content: systemPrompt } ];
+    if (contextLines) messages.push({ role: 'system', content: `CLIENT_DATA\n${contextLines}` });
+    history.slice(-8).forEach(m => {
+      if (m.role === 'user' || m.role === 'assistant') messages.push({ role: m.role, content: m.content });
+    });
+    messages.push({ role: 'user', content: taskUserBlock });
+    const completion = await openai.chat.completions.create({
+      model: process.env.OPENAI_TEXT_MODEL || 'gpt-4o-mini',
+      messages,
+      temperature: 0.6,
+      max_tokens: 650
+    });
+    let reply = completion.choices?.[0]?.message?.content?.trim() || 'No response';
+    reply = reply.replace(/Let me know what you would like to do next\.?/gi, '').trim();
+    res.json({ success: true, reply, usedContext: Boolean(contextLines), intents, missingOfferFields });
+  } catch (error) {
+    console.error('client/chat error:', error);
+    res.status(500).json({ success: false, error: 'Client chat failed', details: error.message });
+  }
+});
+
+// --- New Endpoint: General AI Chat (ChatGPT-like) ---
+app.post('/api/ai/chat', authenticateToken, async (req, res) => {
+  try {
+    const { messages } = req.body;
+    if (!messages || !Array.isArray(messages) || messages.length === 0) {
+      return res.status(400).json({ success: false, error: 'messages array required' });
+    }
+    if (!openai) return res.json({ success: true, reply: 'AI unavailable (missing OPENAI_API_KEY).' });
+    const completion = await openai.chat.completions.create({
+      model: process.env.OPENAI_TEXT_MODEL || 'gpt-4o-mini',
+  messages: [ { role: 'system', content: 'You are an expert real estate copilot. Understand ambiguous or shorthand user input, ask for clarification only when essential, and provide concise, accurate, context-aware answers. If user asks about follow-up, you may suggest using the follow-up button but DO NOT fabricate sheet data.' }, ...messages ],
+      temperature: 0.7,
+      max_tokens: 600
+    });
+    const reply = completion.choices?.[0]?.message?.content || 'No response';
+    res.json({ success: true, reply });
+  } catch (error) {
+    console.error('ai/chat error:', error);
+    res.status(500).json({ success: false, error: 'Chat failed', details: error.message });
+  }
+});
+
 const upload = multer({ 
   storage: storage,
   fileFilter: function (req, file, cb) {
@@ -103,9 +419,12 @@ const upload = multer({
   }
 });
 
-// Initialize Supabase client
-const supabaseUrl = 'https://invadbpskztiooidhyui.supabase.co';
-const supabaseKey = process.env.SUPABASE_KEY;
+// Initialize Supabase client (prefer service role key server-side)
+const supabaseUrl = process.env.SUPABASE_URL || 'https://invadbpskztiooidhyui.supabase.co';
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY || process.env.SUPABASE_ANON_KEY;
+if (!supabaseKey) {
+  console.warn('⚠️  No Supabase key found (SUPABASE_SERVICE_ROLE_KEY / SUPABASE_KEY / SUPABASE_ANON_KEY). Database features will fail.');
+}
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 // Initialize OpenAI client
@@ -860,51 +1179,92 @@ app.get('/api/auth/activity', authenticateToken, async (req, res) => {
 // Main automation endpoint
 app.post('/api/generate-followup', authenticateToken, async (req, res) => {
   try {
-    const { clientId } = req.body;
+    const { client_name, client_email, follow_up_notes, client_stage, agent_name } = req.body;
 
-    if (!clientId) {
+    if (!client_name || !follow_up_notes) {
       return res.status(400).json({
-        success: false,
-        error: 'clientId is required'
+        status: 'error',
+        message: 'client_name and follow_up_notes are required'
       });
     }
 
-    // Use authenticated user's ID as agentId
-    const userId = req.user.userId;
-
-    // Step 1: Get latest client note
-    const clientNote = await getLatestClientNote(clientId);
-    if (!clientNote) {
-      return res.status(404).json({
-        success: false,
-        error: 'No client note found'
+    // Check if OpenAI is available
+    if (!openai) {
+      return res.status(500).json({
+        status: 'error',
+        message: 'OpenAI API is not configured'
       });
     }
 
-    // Step 2: Get agent's previous messages
-    const agentMessages = await getAgentMessages(userId);
+    console.log('🔍 Generating follow-up email for:', client_name);
 
-    // Step 3: Generate follow-up message
-    const generatedMessage = await generateFollowUpMessage(clientNote, agentMessages);
+    // Generate follow-up email using OpenAI
+    const completion = await openai.chat.completions.create({
+      model: process.env.OPENAI_TEXT_MODEL || 'gpt-4',
+      messages: [
+        {
+          role: 'system',
+          content: `You are a professional real estate agent assistant. Generate a personalized follow-up email based on the client's notes. The email should be:
+- Professional but warm and friendly
+- Specific to the client's situation and needs
+- Include a clear call to action
+- Reference specific details from their notes
+- Be concise but comprehensive (2-3 paragraphs)
 
-    // Step 4: Log the generated message
-    const loggedMessage = await logGeneratedMessage(userId, clientId, generatedMessage);
+Return the response in this exact JSON format:
+{
+  "subject": "email subject line",
+  "body": "email body content"
+}`
+        },
+        {
+          role: 'user',
+          content: `Generate a follow-up email for:
+Client: ${client_name}
+Email: ${client_email}
+Stage: ${client_stage || 'Not specified'}
+Agent: ${agent_name || 'Real Estate Agent'}
+
+Follow-up Notes (Column Y):
+${follow_up_notes}
+
+Please create a personalized email that references the specific information in their notes.`
+        }
+      ],
+      temperature: 0.7,
+      max_tokens: 1000
+    });
+
+    const response = completion.choices[0].message.content;
+    console.log('🤖 OpenAI response received');
+
+    // Parse the JSON response
+    let emailData;
+    try {
+      emailData = JSON.parse(response);
+    } catch (parseError) {
+      console.error('Failed to parse OpenAI response as JSON:', parseError);
+      // Fallback: extract subject and body manually
+      const lines = response.split('\n').filter(line => line.trim());
+      emailData = {
+        subject: `Follow-up regarding your real estate needs`,
+        body: response
+      };
+    }
 
     res.json({
-      success: true,
-      data: {
-        message: generatedMessage,
-        loggedMessage: loggedMessage,
-        clientNote: clientNote,
-        agentMessagesCount: agentMessages.length
-      }
+      status: 'success',
+      subject: emailData.subject,
+      body: emailData.body,
+      client_name: client_name,
+      generated_at: new Date().toISOString()
     });
 
   } catch (error) {
     console.error('Error in generate-followup:', error);
     res.status(500).json({
-      success: false,
-      error: 'Internal server error',
+      status: 'error',
+      message: 'Failed to generate follow-up email',
       details: error.message
     });
   }
@@ -1224,9 +1584,1433 @@ app.get('/api/data', authenticateToken, async (req, res) => {
   }
 });
 
+// Setup database tables endpoint
+app.post('/api/setup/chat-tables', async (req, res) => {
+  try {
+    console.log('Checking chat tables...');
+    
+    let results = {
+      success: true,
+      message: 'Chat tables status checked',
+      tables: {}
+    };
+
+    // Check if chat_messages table exists by trying to query it
+    try {
+      const { data, error } = await supabase
+        .from('chat_messages')
+        .select('id')
+        .limit(1);
+      
+      if (error) {
+        if (error.code === 'PGRST116') {
+          results.tables.chat_messages = 'Table does not exist - needs manual creation';
+          results.success = false;
+        } else {
+          results.tables.chat_messages = `Error: ${error.message}`;
+        }
+      } else {
+        results.tables.chat_messages = 'Table exists and accessible';
+      }
+    } catch (err) {
+      results.tables.chat_messages = `Error checking table: ${err.message}`;
+    }
+
+    // Check if chat_actions table exists
+    try {
+      const { data, error } = await supabase
+        .from('chat_actions')
+        .select('id')
+        .limit(1);
+      
+      if (error) {
+        if (error.code === 'PGRST116') {
+          results.tables.chat_actions = 'Table does not exist - needs manual creation';
+          results.success = false;
+        } else {
+          results.tables.chat_actions = `Error: ${error.message}`;
+        }
+      } else {
+        results.tables.chat_actions = 'Table exists and accessible';
+      }
+    } catch (err) {
+      results.tables.chat_actions = `Error checking table: ${err.message}`;
+    }
+
+    // Provide SQL for manual creation if needed
+    if (!results.success) {
+      results.sql_to_run_manually = {
+        chat_messages: `
+          CREATE TABLE public.chat_messages (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            agent_id UUID NOT NULL,
+            client_id UUID NOT NULL,
+            role TEXT NOT NULL CHECK (role IN ('user','assistant','system')),
+            content TEXT NOT NULL,
+            mode TEXT DEFAULT 'GUIDED',
+            created_at TIMESTAMPTZ DEFAULT NOW()
+          );
+          CREATE INDEX chat_messages_agent_client_idx ON public.chat_messages(agent_id, client_id, created_at DESC);
+        `,
+        chat_actions: `
+          CREATE TABLE public.chat_actions (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            message_id UUID REFERENCES public.chat_messages(id) ON DELETE SET NULL,
+            agent_id UUID NOT NULL,
+            client_id UUID NOT NULL,
+            action_type TEXT NOT NULL,
+            parameters JSONB DEFAULT '{}'::jsonb,
+            executed BOOLEAN DEFAULT FALSE,
+            executed_at TIMESTAMPTZ,
+            created_at TIMESTAMPTZ DEFAULT NOW()
+          );
+          CREATE INDEX chat_actions_agent_client_idx ON public.chat_actions(agent_id, client_id, created_at DESC);
+        `
+      };
+    }
+
+    res.json(results);
+  } catch (error) {
+    console.error('Database setup error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to check chat tables',
+      error: error.message
+    });
+  }
+});
+
 // Health check endpoint
 app.get('/api/health', (req, res) => {
   res.json({ status: 'OK', timestamp: new Date().toISOString() });
+});
+
+// ================= CHAT / COPILOT ENDPOINTS =================
+app.post('/api/chat/message', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { clientId, message, mode } = req.body;
+    if (!clientId || !message) {
+      return res.status(400).json({ success: false, error: 'clientId and message are required' });
+    }
+    let userMsgId = null;
+    try {
+      const { data, error } = await supabase.from('chat_messages').insert([
+        { agent_id: userId, client_id: clientId, role: 'user', content: message, mode: mode || 'GUIDED', created_at: new Date().toISOString() }
+      ]).select('id').single();
+      if (error) console.warn('chat_messages insert error:', error.message);
+      userMsgId = data?.id || null;
+    } catch (e) { console.warn('chat_messages table missing:', e.message); }
+    const plan = generateAssistantPlan({ message, mode: mode || 'GUIDED', clientContext: {}, clientId });
+    let assistantMsgId = null;
+    try {
+      const { data, error } = await supabase.from('chat_messages').insert([
+        { agent_id: userId, client_id: clientId, role: 'assistant', content: plan.response_text, mode: plan.mode, created_at: new Date().toISOString() }
+      ]).select('id').single();
+      if (error) console.warn('assistant message insert error:', error.message);
+      assistantMsgId = data?.id || null;
+      if (assistantMsgId && Array.isArray(plan.chips)) {
+        const rows = plan.chips.map(c => ({ message_id: assistantMsgId, agent_id: userId, client_id: clientId, action_type: c.action_type, parameters: c.parameters, executed: false, created_at: new Date().toISOString() }));
+        const { error: actErr } = await supabase.from('chat_actions').insert(rows);
+        if (actErr) console.warn('chat_actions insert error:', actErr.message);
+      }
+    } catch (e) { console.warn('assistant persistence skipped:', e.message); }
+    res.json({ success: true, data: { plan, userMessageId: userMsgId, assistantMessageId: assistantMsgId } });
+  } catch (e) {
+    console.error('chat message error:', e);
+    res.status(500).json({ success: false, error: 'Internal server error', details: e.message });
+  }
+});
+
+app.post('/api/chat/action/execute', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { action_type, parameters = {}, clientId } = req.body;
+    if (!action_type || !clientId) return res.status(400).json({ success: false, error: 'action_type and clientId are required' });
+    
+    let executionResult = { status: 'queued', detail: 'Processing action...', message: '' };
+    
+    // Fetch client details for context
+    let clientData = {};
+    try {
+      const { data: client, error: clientError } = await supabase
+        .from('clients')
+        .select('*')
+        .eq('id', clientId)
+        .eq('agent_id', userId)
+        .single();
+      
+      if (clientError) throw clientError;
+    } catch (e) {
+      console.warn('Could not fetch client data for action:', e.message);
+    }
+    
+    // Execute different action types
+    switch (action_type) {
+      case 'COMM_FOLLOW_UP_SEND':
+      case 'FOLLOW_UP_SEND':
+        try {
+          // Get comprehensive client context including notes, interactions, and preferences
+          const { data: notes } = await supabase
+            .from('client_notes')
+            .select('*')
+            .eq('client_id', clientId)
+            .eq('agent_id', userId)
+            .order('created_at', { ascending: false })
+            .limit(5);
+
+          const { data: recentInteractions } = await supabase
+            .from('interactions')
+            .select('*')
+            .eq('client_id', clientId)
+            .eq('agent_id', userId)
+            .order('created_at', { ascending: false })
+            .limit(3);
+
+          // Build context-rich follow-up content
+          let contextSummary = '';
+          if (notes && notes.length > 0) {
+            const recentNote = notes[0];
+            contextSummary += `Recent notes: ${recentNote.content.substring(0, 150)}...`;
+          }
+          
+          const followUpContent = `Follow-up for ${clientData.full_name || clientData.first_name || 'client'}: Thank you for your continued interest. 
+
+Based on our recent conversations and your preferences:
+• Budget: ${clientData.preferences?.budget_max || clientData.preferences?.budget || 'TBD'}
+• Property Type: ${clientData.preferences?.property_type || 'TBD'}  
+• Location: ${clientData.preferences?.location || clientData.state || 'TBD'}
+• Bedrooms: ${clientData.preferences?.beds_min || 'TBD'}+
+
+${contextSummary}
+
+I've identified some new opportunities that might interest you. Let's schedule a call to discuss these options and address any questions you may have.`;
+          
+          // Store as interaction and client note for full context
+          const { error: noteError } = await supabase.from('client_notes').insert([{ 
+            agent_id: userId, 
+            client_id: clientId, 
+            content: `Generated Follow-up: ${followUpContent}`, 
+            created_at: new Date().toISOString() 
+          }]);
+
+          const { error: interactionError } = await supabase.from('interactions').insert([{
+            client_id: clientId,
+            agent_id: userId,
+            channel: 'ai',
+            subject: 'AI-Generated Follow-up',
+            body_text: followUpContent,
+            metadata: { action_type: 'FOLLOW_UP_SEND', context_notes_count: notes?.length || 0 },
+            created_at: new Date().toISOString()
+          }]);
+          
+          if (noteError || interactionError) throw (noteError || interactionError);
+          
+          executionResult = {
+            status: 'success',
+            detail: `Follow-up generated with ${notes?.length || 0} recent notes context`,
+            message: `📧 Context-rich follow-up created for ${clientData.full_name || clientData.first_name || 'client'}. Includes recent notes and full client preferences.`
+          };
+        } catch (error) {
+          executionResult = {
+            status: 'failed',
+            detail: `Failed to generate follow-up: ${error.message}`,
+            message: '❌ Failed to generate follow-up'
+          };
+        }
+        break;
+        
+      case 'SHOWING_SCHEDULE':
+        try {
+          // Get comprehensive client context including notes, interactions, and showing history
+          const { data: notes } = await supabase
+            .from('client_notes')
+            .select('*')
+            .eq('client_id', clientId)
+            .eq('agent_id', userId)
+            .order('created_at', { ascending: false })
+            .limit(3);
+
+          const { data: previousShowings } = await supabase
+            .from('showings')
+            .select('*')
+            .eq('client_id', clientId)
+            .eq('agent_id', userId)
+            .order('start_time', { ascending: false })
+            .limit(3);
+
+          const { data: propertyInterests } = await supabase
+            .from('client_properties')
+            .select('*, property_listings(*)')
+            .eq('client_id', clientId)
+            .eq('agent_id', userId)
+            .order('created_at', { ascending: false })
+            .limit(5);
+
+          // Build detailed showing context
+          let clientContext = '';
+          if (notes && notes.length > 0) {
+            clientContext += `Recent client notes: ${notes[0].content.substring(0, 100)}...\n`;
+          }
+          
+          if (propertyInterests && propertyInterests.length > 0) {
+            clientContext += `Properties of interest: ${propertyInterests.map(p => p.property_listings?.address || 'Address TBD').join(', ')}\n`;
+          }
+
+          const showingNote = `🏠 SHOWING SCHEDULED for ${clientData.full_name || clientData.first_name || 'client'}
+
+CLIENT PREFERENCES:
+• Budget: ${clientData.preferences?.budget_max || clientData.preferences?.budget || 'TBD'}
+• Property Type: ${clientData.preferences?.property_type || 'TBD'}
+• Bedrooms: ${clientData.preferences?.beds_min || 'TBD'}+
+• Location: ${clientData.preferences?.location || clientData.state || 'TBD'}
+
+${clientContext}
+
+Previous showings: ${previousShowings?.length || 0}
+Action: Schedule confirmation and prepare showing materials.`;
+          
+          // Store comprehensive showing record
+          const { error: noteError } = await supabase.from('client_notes').insert([{ 
+            agent_id: userId, 
+            client_id: clientId, 
+            content: showingNote, 
+            created_at: new Date().toISOString() 
+          }]);
+
+          const { error: interactionError } = await supabase.from('interactions').insert([{
+            client_id: clientId,
+            agent_id: userId,
+            channel: 'note',
+            subject: 'Showing Scheduled',
+            body_text: showingNote,
+            metadata: { 
+              action_type: 'SHOWING_SCHEDULE', 
+              notes_count: notes?.length || 0,
+              previous_showings: previousShowings?.length || 0,
+              interested_properties: propertyInterests?.length || 0
+            },
+            created_at: new Date().toISOString()
+          }]);
+          
+          if (noteError || interactionError) throw (noteError || interactionError);
+          
+          executionResult = {
+            status: 'success',
+            detail: `Showing scheduled with full client context (${notes?.length || 0} notes, ${propertyInterests?.length || 0} property interests)`,
+            message: `🏠 Property showing scheduled for ${clientData.full_name || clientData.first_name || 'client'}. Complete context and history recorded.`
+          };
+        } catch (error) {
+          executionResult = {
+            status: 'failed',
+            detail: `Failed to schedule showing: ${error.message}`,
+            message: '❌ Failed to schedule showing'
+          };
+        }
+        break;
+        
+      case 'CONTRACT_AMEND':
+        try {
+          // Get comprehensive contract context including notes, contract history, and client status
+          const { data: notes } = await supabase
+            .from('client_notes')
+            .select('*')
+            .eq('client_id', clientId)
+            .eq('agent_id', userId)
+            .order('created_at', { ascending: false })
+            .limit(5);
+
+          const { data: contracts } = await supabase
+            .from('contracts')
+            .select('*')
+            .eq('client_id', clientId)
+            .eq('agent_id', userId)
+            .order('created_at', { ascending: false })
+            .limit(3);
+
+          const { data: contractEvents } = await supabase
+            .from('contract_events')
+            .select('*')
+            .eq('agent_id', userId)
+            .order('created_at', { ascending: false })
+            .limit(5);
+
+          // Build comprehensive contract context
+          let contractContext = '';
+          if (notes && notes.length > 0) {
+            const contractRelatedNotes = notes.filter(note => 
+              note.content.toLowerCase().includes('contract') || 
+              note.content.toLowerCase().includes('offer') ||
+              note.content.toLowerCase().includes('amendment')
+            );
+            if (contractRelatedNotes.length > 0) {
+              contractContext += `Recent contract-related notes: ${contractRelatedNotes[0].content.substring(0, 150)}...\n`;
+            }
+          }
+
+          if (contracts && contracts.length > 0) {
+            const currentContract = contracts[0];
+            contractContext += `Current contract status: ${currentContract.status} (${currentContract.contract_type})\n`;
+            contractContext += `DocuSign ID: ${currentContract.docusign_envelope_id || 'Not set'}\n`;
+          }
+
+          const contractNote = `📋 CONTRACT AMENDMENT REQUEST for ${clientData.full_name || clientData.first_name || 'client'}
+
+CLIENT DETAILS:
+• Full Name: ${clientData.full_name || clientData.first_name || 'TBD'}
+• Email: ${clientData.email || 'TBD'}
+• Phone: ${clientData.phone || 'TBD'}
+• State: ${clientData.state || 'TBD'}
+
+CONTRACT STATUS & CONTEXT:
+${contractContext}
+
+AMENDMENT REQUIRED:
+• Review current contract terms
+• Identify specific amendments needed
+• Prepare documentation for legal review
+• Schedule client consultation
+
+Active contracts: ${contracts?.length || 0}
+Recent contract events: ${contractEvents?.length || 0}`;
+          
+          // Store comprehensive amendment record
+          const { error: noteError } = await supabase.from('client_notes').insert([{ 
+            agent_id: userId, 
+            client_id: clientId, 
+            content: contractNote, 
+            created_at: new Date().toISOString() 
+          }]);
+
+          const { error: interactionError } = await supabase.from('interactions').insert([{
+            client_id: clientId,
+            agent_id: userId,
+            channel: 'note',
+            subject: 'Contract Amendment Request',
+            body_text: contractNote,
+            metadata: { 
+              action_type: 'CONTRACT_AMEND',
+              active_contracts: contracts?.length || 0,
+              recent_events: contractEvents?.length || 0,
+              client_status: contracts?.[0]?.status || 'unknown'
+            },
+            created_at: new Date().toISOString()
+          }]);
+          
+          if (noteError || interactionError) throw (noteError || interactionError);
+          
+          executionResult = {
+            status: 'success',
+            detail: `Contract amendment logged with full context (${contracts?.length || 0} contracts, ${contractEvents?.length || 0} events)`,
+            message: `📋 Contract amendment request created for ${clientData.full_name || clientData.first_name || 'client'}. Complete contract history and context recorded.`
+          };
+        } catch (error) {
+          executionResult = {
+            status: 'failed',
+            detail: `Failed to log contract amendment: ${error.message}`,
+            message: '❌ Failed to create contract amendment request'
+          };
+        }
+        break;
+        
+      case 'LISTING_SHARE':
+        try {
+          // Get comprehensive property and client context for intelligent listing sharing
+          const { data: notes } = await supabase
+            .from('client_notes')
+            .select('*')
+            .eq('client_id', clientId)
+            .eq('agent_id', userId)
+            .order('created_at', { ascending: false })
+            .limit(5);
+
+          const { data: propertyInterests } = await supabase
+            .from('client_properties')
+            .select('*, property_listings(*)')
+            .eq('client_id', clientId)
+            .eq('agent_id', userId)
+            .order('created_at', { ascending: false });
+
+          const { data: availableListings } = await supabase
+            .from('property_listings')
+            .select('*')
+            .eq('agent_id', userId)
+            .eq('status', 'active')
+            .order('created_at', { ascending: false })
+            .limit(10);
+
+          // Build intelligent listing context
+          let propertyContext = '';
+          if (notes && notes.length > 0) {
+            const propertyNotes = notes.filter(note => 
+              note.content.toLowerCase().includes('property') || 
+              note.content.toLowerCase().includes('house') ||
+              note.content.toLowerCase().includes('listing') ||
+              note.content.toLowerCase().includes('showing')
+            );
+            if (propertyNotes.length > 0) {
+              propertyContext += `Recent property discussions: ${propertyNotes[0].content.substring(0, 150)}...\n`;
+            }
+          }
+
+          const listingNote = `🔍 INTELLIGENT LISTING SHARE for ${clientData.full_name || clientData.first_name || 'client'}
+
+CLIENT SEARCH CRITERIA:
+• Budget: ${clientData.preferences?.budget_max || clientData.preferences?.budget || 'TBD'}
+• Property Type: ${clientData.preferences?.property_type || 'TBD'}
+• Bedrooms: ${clientData.preferences?.beds_min || clientData.preferences?.bedrooms || 'TBD'}+
+• Bathrooms: ${clientData.preferences?.baths_min || clientData.preferences?.bathrooms || 'TBD'}+
+• Location: ${clientData.preferences?.location || clientData.state || 'TBD'}
+
+CLIENT CONTEXT:
+${propertyContext}
+
+PROPERTY TRACKING:
+• Previously viewed properties: ${propertyInterests?.length || 0}
+• Available matching listings: ${availableListings?.length || 0}
+• Property interests tracked: ${propertyInterests?.map(p => p.interest_level).join(', ') || 'None'}
+
+RECOMMENDED ACTIONS:
+• Filter listings by client criteria
+• Review property interest history
+• Prepare personalized property recommendations
+• Schedule follow-up to discuss options`;
+          
+          // Store comprehensive listing record
+          const { error: noteError } = await supabase.from('client_notes').insert([{ 
+            agent_id: userId, 
+            client_id: clientId, 
+            content: listingNote, 
+            created_at: new Date().toISOString() 
+          }]);
+
+          const { error: interactionError } = await supabase.from('interactions').insert([{
+            client_id: clientId,
+            agent_id: userId,
+            channel: 'note',
+            subject: 'Intelligent Listing Share',
+            body_text: listingNote,
+            metadata: { 
+              action_type: 'LISTING_SHARE',
+              property_interests: propertyInterests?.length || 0,
+              available_listings: availableListings?.length || 0,
+              search_criteria: {
+                budget: clientData.preferences?.budget_max || clientData.preferences?.budget,
+                property_type: clientData.preferences?.property_type,
+                beds: clientData.preferences?.beds_min || clientData.preferences?.bedrooms,
+                baths: clientData.preferences?.baths_min || clientData.preferences?.bathrooms,
+                location: clientData.preferences?.location || clientData.state
+              }
+            },
+            created_at: new Date().toISOString()
+          }]);
+          
+          if (noteError || interactionError) throw (noteError || interactionError);
+          
+          executionResult = {
+            status: 'success',
+            detail: `Intelligent listing share created with full context (${propertyInterests?.length || 0} interests, ${availableListings?.length || 0} available)`,
+            message: `🔍 Intelligent listing share created for ${clientData.full_name || clientData.first_name || 'client'}. Complete property context and recommendations ready.`
+          };
+        } catch (error) {
+          executionResult = {
+            status: 'failed',
+            detail: `Failed to create listing task: ${error.message}`,
+            message: '❌ Failed to create listing sharing task'
+          };
+        }
+        break;
+        
+      case 'LEDGER_LOG_EVENT':
+        try {
+          const { error } = await supabase.from('client_notes').insert([{ 
+            agent_id: userId, 
+            client_id: clientId, 
+            content: `Ledger Event: ${parameters.summary || '[Event logged]'}`, 
+            created_at: new Date().toISOString() 
+          }]);
+          
+          if (error) throw error;
+          
+          executionResult = {
+            status: 'success',
+            detail: 'Event logged successfully',
+            message: `📝 Event logged for ${clientData.first_name || 'client'}.`
+          };
+        } catch (error) {
+          executionResult = {
+            status: 'failed',
+            detail: `Failed to log event: ${error.message}`,
+            message: '❌ Failed to log event'
+          };
+        }
+        break;
+
+      case 'FOLLOW_UP_CHECK_LAST':
+        try {
+          // Get last correspondence from interactions
+          const { data: lastInteraction, error: intError } = await supabase
+            .from('interactions')
+            .select('*')
+            .eq('client_id', clientId)
+            .eq('agent_id', userId)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .single();
+
+          let message = `📧 **Last Correspondence with ${clientData.first_name || 'Client'}:**\n\n`;
+          
+          if (intError || !lastInteraction) {
+            message += "No previous correspondence found in the system.";
+          } else {
+            const date = new Date(lastInteraction.created_at).toLocaleDateString();
+            message += `**Date:** ${date}\n**Channel:** ${lastInteraction.channel}\n`;
+            if (lastInteraction.subject) message += `**Subject:** ${lastInteraction.subject}\n`;
+            if (lastInteraction.body_text) {
+              message += `**Content:** ${lastInteraction.body_text.substring(0, 200)}${lastInteraction.body_text.length > 200 ? '...' : ''}`;
+            }
+          }
+
+          executionResult = {
+            status: 'success',
+            detail: 'Last correspondence retrieved',
+            message: message
+          };
+        } catch (error) {
+          executionResult = {
+            status: 'failed',
+            detail: `Failed to retrieve correspondence: ${error.message}`,
+            message: '❌ Failed to retrieve last correspondence'
+          };
+        }
+        break;
+
+      case 'FOLLOW_UP_CLIENT_DETAILS':
+        try {
+          let message = `👤 **Client Details for ${clientData.first_name || 'Client'}:**\n\n`;
+          
+          if (clientData.email) message += `📧 **Email:** ${clientData.email}\n`;
+          if (clientData.phone) message += `📱 **Phone:** ${clientData.phone}\n`;
+          if (clientData.state) message += `📍 **State:** ${clientData.state}\n`;
+          
+          if (clientData.preferences) {
+            message += `\n**Preferences:**\n`;
+            if (typeof clientData.preferences === 'object') {
+              Object.entries(clientData.preferences).forEach(([key, value]) => {
+                message += `• ${key.replace(/_/g, ' ')}: ${value}\n`;
+              });
+            } else {
+              message += `${clientData.preferences}\n`;
+            }
+          }
+          
+          if (clientData.last_interaction_at) {
+            const lastDate = new Date(clientData.last_interaction_at).toLocaleDateString();
+            message += `\n🕒 **Last Interaction:** ${lastDate}`;
+          }
+
+          executionResult = {
+            status: 'success',
+            detail: 'Client details retrieved',
+            message: message
+          };
+        } catch (error) {
+          executionResult = {
+            status: 'failed',
+            detail: `Failed to retrieve client details: ${error.message}`,
+            message: '❌ Failed to retrieve client details'
+          };
+        }
+        break;
+
+      case 'FOLLOW_UP_SEARCH_HISTORY':
+        try {
+          let message = `🔍 **Client History Summary for ${clientData.first_name || 'Client'}:**\n\n`;
+          
+          // Get recent notes directly from database
+          try {
+            const { data: notes } = await supabase
+              .from('client_notes')
+              .select('*')
+              .eq('client_id', clientId)
+              .eq('agent_id', userId)
+              .order('created_at', { ascending: false })
+              .limit(3);
+            
+            if (notes && notes.length > 0) {
+              message += `📝 **Recent Notes (${notes.length}):**\n`;
+              notes.forEach(note => {
+                const date = new Date(note.created_at).toLocaleDateString();
+                message += `• ${date}: ${note.content?.substring(0, 100)}${note.content?.length > 100 ? '...' : ''}\n`;
+              });
+              message += '\n';
+            } else {
+              message += `📝 **Recent Notes:** No notes found\n\n`;
+            }
+          } catch (e) {
+            message += `📝 **Recent Notes:** Error retrieving notes\n\n`;
+          }
+
+          // Get recent interactions
+          try {
+            const { data: interactions } = await supabase
+              .from('interactions')
+              .select('*')
+              .eq('client_id', clientId)
+              .eq('agent_id', userId)
+              .order('created_at', { ascending: false })
+              .limit(2);
+            
+            if (interactions && interactions.length > 0) {
+              message += `💬 **Recent Interactions (${interactions.length}):**\n`;
+              interactions.forEach(int => {
+                const date = new Date(int.created_at).toLocaleDateString();
+                message += `• ${date} (${int.channel}): ${int.subject || 'No subject'}\n`;
+              });
+              message += '\n';
+            } else {
+              message += `💬 **Recent Interactions:** No interactions found\n\n`;
+            }
+          } catch (e) {
+            message += `💬 **Recent Interactions:** Error retrieving interactions\n\n`;
+          }
+
+          // Get contracts
+          try {
+            const { data: contracts } = await supabase
+              .from('contracts')
+              .select('*')
+              .eq('client_id', clientId)
+              .eq('agent_id', userId)
+              .order('created_at', { ascending: false })
+              .limit(3);
+            
+            if (contracts && contracts.length > 0) {
+              message += `📋 **Contracts (${contracts.length}):** ${contracts.map(c => c.status).join(', ')}\n`;
+            } else {
+              message += `📋 **Contracts:** No contracts found\n`;
+            }
+          } catch (e) {
+            message += `📋 **Contracts:** Error retrieving contracts\n`;
+          }
+
+          // Get showings
+          try {
+            const { data: showings } = await supabase
+              .from('showings')
+              .select('*')
+              .eq('client_id', clientId)
+              .eq('agent_id', userId)
+              .order('created_at', { ascending: false })
+              .limit(3);
+            
+            if (showings && showings.length > 0) {
+              message += `🏠 **Showings (${showings.length}):** Recent property viewings scheduled\n`;
+            } else {
+              message += `🏠 **Showings:** No showings found\n`;
+            }
+          } catch (e) {
+            message += `🏠 **Showings:** Error retrieving showings\n`;
+          }
+
+          executionResult = {
+            status: 'success',
+            detail: 'Client history retrieved',
+            message: message
+          };
+        } catch (error) {
+          executionResult = {
+            status: 'failed',
+            detail: `Failed to search history: ${error.message}`,
+            message: '❌ Failed to search client history'
+          };
+        }
+        break;
+
+      case 'FOLLOW_UP_GENERATE':
+        try {
+          // Get comprehensive client context for AI-powered follow-up generation
+          const { data: notes } = await supabase
+            .from('client_notes')
+            .select('*')
+            .eq('client_id', clientId)
+            .eq('agent_id', userId)
+            .order('created_at', { ascending: false })
+            .limit(5);
+
+          const { data: recentInteractions } = await supabase
+            .from('interactions')
+            .select('*')
+            .eq('client_id', clientId)
+            .eq('agent_id', userId)
+            .order('created_at', { ascending: false })
+            .limit(3);
+
+          const { data: propertyInterests } = await supabase
+            .from('client_properties')
+            .select('*, property_listings(*)')
+            .eq('client_id', clientId)
+            .eq('agent_id', userId)
+            .order('created_at', { ascending: false })
+            .limit(3);
+
+          // Generate AI-powered follow-up content using comprehensive context
+          let followUpContent = '';
+          
+          if (openai) {
+            // Build rich context for AI
+            let contextString = `Client: ${clientData.full_name || clientData.first_name || 'Client'}\nEmail: ${clientData.email || 'N/A'}\nPhone: ${clientData.phone || 'N/A'}\nState: ${clientData.state || 'Unknown'}\nPreferences: ${JSON.stringify(clientData.preferences || {})}`;
+
+            if (notes && notes.length > 0) {
+              contextString += `\n\nRecent Client Notes:\n${notes.map(note => `• ${note.content.substring(0, 200)}`).join('\n')}`;
+            }
+
+            if (recentInteractions && recentInteractions.length > 0) {
+              contextString += `\n\nRecent Interactions:\n${recentInteractions.map(int => `• ${int.channel}: ${int.subject || ''} - ${int.body_text?.substring(0, 100) || ''}`).join('\n')}`;
+            }
+
+            if (propertyInterests && propertyInterests.length > 0) {
+              contextString += `\n\nProperty Interests:\n${propertyInterests.map(p => `• ${p.property_listings?.address || 'Property'} (${p.interest_level})`).join('\n')}`;
+            }
+            
+            const completion = await openai.chat.completions.create({
+              model: process.env.OPENAI_TEXT_MODEL || 'gpt-4o-mini',
+              messages: [
+                {
+                  role: 'system',
+                  content: 'You are a professional real estate agent assistant. Generate a personalized, warm follow-up message for this client based on their comprehensive information including recent notes, interactions, and property interests. Reference specific details from their history to show you remember their preferences and concerns. Keep it professional but friendly, under 550 words.'
+                },
+                {
+                  role: 'user',
+                  content: `Generate a personalized follow-up message using this comprehensive client context:\n\n${contextString}`
+                }
+              ],
+              max_tokens: 400,
+              temperature: 0.7
+            });
+            
+            followUpContent = completion.choices[0]?.message?.content || 'Thank you for your continued interest in finding your dream home. I wanted to follow up and see how I can best assist you in your home search.';
+          } else {
+            // Fallback content with basic personalization
+            let personalizedContent = `Hi ${clientData.first_name || 'there'},\n\nI hope you're doing well! I wanted to follow up on your home search and see if there's anything new I can help you with.`;
+            
+            if (notes && notes.length > 0) {
+              personalizedContent += ` Based on our recent conversations, I've been keeping an eye on properties that match your interests.`;
+            }
+            
+            personalizedContent += `\n\nLet me know if you'd like to schedule a time to discuss your current needs or if you have any questions.\n\nBest regards`;
+            followUpContent = personalizedContent;
+          }
+          
+          // Store comprehensive follow-up record
+          const { error: noteError } = await supabase.from('client_notes').insert([{ 
+            agent_id: userId, 
+            client_id: clientId, 
+            content: `AI-Generated Follow-up: ${followUpContent}`, 
+            created_at: new Date().toISOString() 
+          }]);
+
+          const { error: interactionError } = await supabase.from('interactions').insert([{
+            client_id: clientId,
+            agent_id: userId,
+            channel: 'ai',
+            subject: 'AI-Generated Follow-up Message',
+            body_text: followUpContent,
+            metadata: { 
+              action_type: 'FOLLOW_UP_GENERATE',
+              context_notes: notes?.length || 0,
+              context_interactions: recentInteractions?.length || 0,
+              context_properties: propertyInterests?.length || 0,
+              ai_generated: !!openai
+            },
+            created_at: new Date().toISOString()
+          }]);
+          
+          if (noteError || interactionError) throw (noteError || interactionError);
+          
+          executionResult = {
+            status: 'success',
+            detail: `AI follow-up generated with comprehensive context (${notes?.length || 0} notes, ${recentInteractions?.length || 0} interactions, ${propertyInterests?.length || 0} properties)`,
+            message: `✉️ **Generated Follow-up for ${clientData.full_name || clientData.first_name || 'Client'}:**\n\n${followUpContent}\n\n*Context: ${notes?.length || 0} notes, ${recentInteractions?.length || 0} interactions, ${propertyInterests?.length || 0} property interests*`
+          };
+        } catch (error) {
+          executionResult = {
+            status: 'failed',
+            detail: `Failed to generate follow-up: ${error.message}`,
+            message: '❌ Failed to generate follow-up'
+          };
+        }
+        break;
+        
+      case 'trigger_follow_up_workflow':
+        try {
+          // Generate the initial follow-up workflow message with 4 follow-up options
+          const baseMessage = `🔄 **Follow-up Options for ${clientData.first_name || 'Client'}**\n\nChoose your next action:`;
+          
+          const followUpOptions = [
+            { action: 'FOLLOW_UP_CHECK_LAST', text: '📋 Check Last Interaction', description: 'Review their most recent activity' },
+            { action: 'FOLLOW_UP_SEARCH_HISTORY', text: '🔍 Search Client History', description: 'Get comprehensive client background' },
+            { action: 'FOLLOW_UP_GENERATE', text: '✉️ Generate Follow-up Message', description: 'Create personalized follow-up content' },
+            { action: 'FOLLOW_UP_CLIENT_DETAILS', text: '👤 Client Details', description: 'Review client information and preferences' }
+          ];
+          
+          // Create the interactive message with clickable options
+          let message = baseMessage + '\n\n';
+          followUpOptions.forEach((option, index) => {
+            message += `**${index + 1}. ${option.text}**\n${option.description}\n\n`;
+          });
+          
+          executionResult = {
+            status: 'success',
+            detail: 'Follow-up workflow initiated',
+            message: message,
+            interactive: true,
+            options: followUpOptions
+          };
+        } catch (error) {
+          executionResult = {
+            status: 'failed',
+            detail: `Failed to trigger follow-up workflow: ${error.message}`,
+            message: '❌ Failed to start follow-up workflow'
+          };
+        }
+        break;
+        
+      default:
+        executionResult = {
+          status: 'pending',
+          detail: 'Action type not yet implemented',
+          message: `⏳ ${action_type} action is queued for processing.`
+        };
+    }
+    
+    // Log the action execution
+    try {
+      const { error } = await supabase.from('chat_actions').insert([{ 
+        agent_id: userId, 
+        client_id: clientId, 
+        action_type, 
+        parameters, 
+        executed: executionResult.status === 'success', 
+        executed_at: executionResult.status === 'success' ? new Date().toISOString() : null, 
+        created_at: new Date().toISOString() 
+      }]);
+      if (error) console.warn('chat_actions execute insert error:', error.message);
+    } catch (e) { 
+      console.warn('chat_actions exec persistence skipped:', e.message); 
+    }
+    
+    res.json({ 
+      success: true, 
+      data: { 
+        action_type, 
+        result: executionResult,
+        message: executionResult.message || executionResult.detail
+      } 
+    });
+  } catch (e) {
+    console.error('action execute error:', e);
+    res.status(500).json({ success: false, error: 'Internal server error', details: e.message });
+  }
+});
+
+app.get('/api/chat/history', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { clientId, limit = 30 } = req.query;
+    if (!clientId) return res.status(400).json({ success: false, error: 'clientId is required' });
+    let messages = [];
+    try {
+      const { data, error } = await supabase.from('chat_messages').select('*').eq('agent_id', userId).eq('client_id', clientId).order('created_at', { ascending: false }).limit(parseInt(limit, 10));
+      if (error) console.warn('chat history fetch error:', error.message);
+      messages = data || [];
+    } catch (e) { console.warn('chat_messages table missing:', e.message); }
+    res.json({ success: true, data: { messages: messages.reverse() } });
+  } catch (e) {
+    console.error('chat history error:', e);
+    res.status(500).json({ success: false, error: 'Internal server error', details: e.message });
+  }
+});
+
+// Client data RAG search endpoint
+app.get('/api/client/search', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { clientId, query, type = 'all' } = req.query;
+    
+    if (!clientId) {
+      return res.status(400).json({ success: false, error: 'clientId is required' });
+    }
+
+    const results = {
+      client_info: null,
+      recent_notes: [],
+      interactions: [],
+      messages: [],
+      contracts: [],
+      showings: []
+    };
+
+    // Get client basic info
+    if (type === 'all' || type === 'client_info') {
+      try {
+        const { data: client, error: clientError } = await supabase
+          .from('clients')
+          .select('*')
+          .eq('id', clientId)
+          .eq('agent_id', userId)
+          .single();
+        if (!clientError && client) results.client_info = client;
+      } catch (e) { console.warn('Client info fetch error:', e.message); }
+    }
+
+    // Get recent notes
+    if (type === 'all' || type === 'notes') {
+      try {
+        const { data: notes, error: notesError } = await supabase
+          .from('client_notes')
+          .select('*')
+          .eq('client_id', clientId)
+          .eq('agent_id', userId)
+          .order('created_at', { ascending: false })
+          .limit(10);
+        if (!notesError) results.recent_notes = notes || [];
+      } catch (e) { console.warn('Notes fetch error:', e.message); }
+    }
+
+    // Get recent interactions
+    if (type === 'all' || type === 'interactions') {
+      try {
+        const { data: interactions, error: intError } = await supabase
+          .from('interactions')
+          .select('*')
+          .eq('client_id', clientId)
+          .eq('agent_id', userId)
+          .order('created_at', { ascending: false })
+          .limit(5);
+        if (!intError) results.interactions = interactions || [];
+      } catch (e) { console.warn('Interactions fetch error:', e.message); }
+    }
+
+    // Get recent chat messages
+    if (type === 'all' || type === 'messages') {
+      try {
+        const { data: messages, error: msgError } = await supabase
+          .from('chat_messages')
+          .select('*')
+          .eq('client_id', clientId)
+          .eq('agent_id', userId)
+          .order('created_at', { ascending: false })
+          .limit(10);
+        if (!msgError) results.messages = messages || [];
+      } catch (e) { console.warn('Messages fetch error:', e.message); }
+    }
+
+    // Get contracts
+    if (type === 'all' || type === 'contracts') {
+      try {
+        const { data: contracts, error: contractError } = await supabase
+          .from('contracts')
+          .select('*')
+          .eq('client_id', clientId)
+          .eq('agent_id', userId)
+          .order('created_at', { ascending: false })
+          .limit(5);
+        if (!contractError) results.contracts = contracts || [];
+      } catch (e) { console.warn('Contracts fetch error:', e.message); }
+    }
+
+    // Get showings
+    if (type === 'all' || type === 'showings') {
+      try {
+        const { data: showings, error: showError } = await supabase
+          .from('showings')
+          .select('*')
+          .eq('client_id', clientId)
+          .eq('agent_id', userId)
+          .order('created_at', { ascending: false })
+          .limit(5);
+        if (!showError) results.showings = showings || [];
+      } catch (e) { console.warn('Showings fetch error:', e.message); }
+    }
+
+    res.json({ success: true, data: results });
+  } catch (e) {
+    console.error('Client search error:', e);
+    res.status(500).json({ success: false, error: 'Internal server error', details: e.message });
+  }
+});
+
+// Test endpoint without authentication for debugging
+app.post('/api/chat/action/execute/test', async (req, res) => {
+  try {
+    const { action_type, parameters = {}, clientId } = req.body;
+    if (!action_type || !clientId) return res.status(400).json({ success: false, error: 'action_type and clientId are required' });
+    
+    // Use a test user ID
+    const userId = 'test-user-id';
+    let executionResult = { status: 'queued', detail: 'Processing action...', message: '' };
+    
+    // Fetch client details for context
+    let clientData = {};
+    try {
+      const { data: client, error: clientError } = await supabase
+        .from('clients')
+        .select('*')
+        .eq('id', clientId)
+        .single();
+      
+      if (!clientError && client) {
+        clientData = client;
+      }
+    } catch (e) {
+      console.warn('Could not fetch client data for action:', e.message);
+    }
+    
+    // Execute different action types
+    switch (action_type) {
+      case 'COMM_FOLLOW_UP_SEND':
+      case 'FOLLOW_UP_SEND':
+        try {
+          const followUpContent = `Follow-up for ${clientData.first_name || 'client'}: Thank you for your continued interest. Based on your preferences, I've identified some new opportunities.`;
+          
+          executionResult = {
+            status: 'success',
+            detail: 'Follow-up generated and ready to send',
+            message: `📧 Follow-up created for ${clientData.first_name || 'client'}. Test mode - no authentication required.`
+          };
+        } catch (error) {
+          executionResult = {
+            status: 'failed',
+            detail: `Failed to generate follow-up: ${error.message}`,
+            message: '❌ Failed to generate follow-up'
+          };
+        }
+        break;
+
+      case 'FOLLOW_UP_CHECK_LAST':
+        try {
+          // Simulate checking last correspondence
+          executionResult = {
+            status: 'success',
+            detail: 'Last correspondence retrieved',
+            message: `📧 **Last Correspondence with ${clientData.first_name || 'Client'}:**\n\nNo previous correspondence found in test mode. This would normally show the last email/call/message with this client.`
+          };
+        } catch (error) {
+          executionResult = {
+            status: 'failed',
+            detail: `Failed to retrieve correspondence: ${error.message}`,
+            message: '❌ Failed to retrieve last correspondence'
+          };
+        }
+        break;
+
+      case 'FOLLOW_UP_CLIENT_DETAILS':
+        try {
+          let message = `👤 **Client Details for ${clientData.first_name || 'Client'}:**\n\n`;
+          
+          if (clientData.email) message += `📧 **Email:** ${clientData.email}\n`;
+          if (clientData.phone) message += `📱 **Phone:** ${clientData.phone}\n`;
+          if (clientData.state) message += `📍 **State:** ${clientData.state}\n`;
+          
+          if (clientData.preferences) {
+            message += `\n**Preferences:**\n`;
+            if (typeof clientData.preferences === 'object') {
+              Object.entries(clientData.preferences).forEach(([key, value]) => {
+                message += `• ${key.replace(/_/g, ' ')}: ${value}\n`;
+              });
+            } else {
+              message += `${clientData.preferences}\n`;
+            }
+          }
+          
+          message += `\n*Test mode - showing available client data*`;
+
+          executionResult = {
+            status: 'success',
+            detail: 'Client details retrieved',
+            message: message
+          };
+        } catch (error) {
+          executionResult = {
+            status: 'failed',
+            detail: `Failed to retrieve client details: ${error.message}`,
+            message: '❌ Failed to retrieve client details'
+          };
+        }
+        break;
+
+      case 'FOLLOW_UP_SEARCH_HISTORY':
+        try {
+          let message = `🔍 **Client History Summary for ${clientData.first_name || 'Client'}:**\n\n`;
+          message += `📝 **Recent Notes:** No notes available in test mode\n`;
+          message += `💬 **Recent Interactions:** No interactions available in test mode\n`;
+          message += `📋 **Contracts:** No contracts available in test mode\n`;
+          message += `🏠 **Showings:** No showings available in test mode\n\n`;
+          message += `*In production mode, this would show comprehensive client history*`;
+
+          executionResult = {
+            status: 'success',
+            detail: 'Client history retrieved',
+            message: message
+          };
+        } catch (error) {
+          executionResult = {
+            status: 'failed',
+            detail: `Failed to search history: ${error.message}`,
+            message: '❌ Failed to search client history'
+          };
+        }
+        break;
+
+      case 'FOLLOW_UP_GENERATE':
+        try {
+          const followUpContent = `Hi ${clientData.first_name || 'there'},\n\nI hope you're doing well! I wanted to follow up on your home search and see if there's anything new I can help you with. Based on your preferences, I've been keeping an eye on the market for opportunities that might interest you.\n\nLet me know if you'd like to schedule a time to discuss your current needs or if you have any questions.\n\nBest regards`;
+          
+          executionResult = {
+            status: 'success',
+            detail: 'Follow-up generated successfully',
+            message: `✉️ **Generated Follow-up for ${clientData.first_name || 'Client'}:**\n\n${followUpContent}\n\n*This is a test-generated message. In production, this would be saved to client notes.*`
+          };
+        } catch (error) {
+          executionResult = {
+            status: 'failed',
+            detail: `Failed to generate follow-up: ${error.message}`,
+            message: '❌ Failed to generate follow-up'
+          };
+        }
+        break;
+        
+      case 'SHOWING_SCHEDULE':
+        try {
+          executionResult = {
+            status: 'success',
+            detail: 'Showing scheduled successfully',
+            message: `🏠 Showing scheduled for ${clientData.first_name || 'client'}. Test mode - no authentication required.`
+          };
+        } catch (error) {
+          executionResult = {
+            status: 'failed',
+            detail: `Failed to schedule showing: ${error.message}`,
+            message: '❌ Failed to schedule showing'
+          };
+        }
+        break;
+        
+      case 'CONTRACT_AMEND':
+        try {
+          executionResult = {
+            status: 'success',
+            detail: 'Contract amendment request logged',
+            message: `📋 Contract amendment request created for ${clientData.first_name || 'client'}. Test mode - no authentication required.`
+          };
+        } catch (error) {
+          executionResult = {
+            status: 'failed',
+            detail: `Failed to log contract amendment: ${error.message}`,
+            message: '❌ Failed to create contract amendment request'
+          };
+        }
+        break;
+        
+      case 'LISTING_SHARE':
+        try {
+          executionResult = {
+            status: 'success',
+            detail: 'Listings prepared for sharing',
+            message: `🏡 Listings prepared for ${clientData.first_name || 'client'}. Test mode - no authentication required.`
+          };
+        } catch (error) {
+          executionResult = {
+            status: 'failed',
+            detail: `Failed to prepare listings: ${error.message}`,
+            message: '❌ Failed to prepare listings for sharing'
+          };
+        }
+        break;
+        
+      default:
+        return res.status(400).json({ success: false, error: `Unsupported action type: ${action_type}` });
+    }
+    
+    // Log action execution for debugging
+    console.log(`Test Action executed: ${action_type} for client ${clientId}`, executionResult);
+    
+    res.json({ 
+      success: true, 
+      data: { 
+        result: executionResult,
+        message: executionResult.message
+      } 
+    });
+    
+  } catch (error) {
+    console.error('Test action execution error:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Internal server error during test action execution',
+      details: error.message 
+    });
+  }
+});
+
+// Test clients endpoint without authentication (must be before parameterized routes)
+// DISABLED - Using frontend static data only
+/*
+app.get('/api/clients/test', async (req, res) => {
+  try {
+    const { data: clients, error } = await supabase
+      .from('clients')
+      .select('*')
+      .limit(20);
+      
+    if (error) throw error;
+    
+    // Transform client data for frontend
+    const transformedClients = clients.map(client => ({
+      id: client.id,
+      name: `${client.first_name || ''} ${client.last_name || ''}`.trim() || 'Unknown Client',
+      first_name: client.first_name,
+      last_name: client.last_name,
+      email: client.email,
+      budget: client.budget || 'Not specified',
+      timeline: client.timeline || 'Not specified',
+      status: client.status || 'Active',
+      preferences: client.preferences,
+      state: client.state || 'VA'
+    }));
+    
+    res.json({ 
+      success: true, 
+      data: transformedClients 
+    });
+    
+  } catch (error) {
+    console.error('Error fetching test clients:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Error fetching clients',
+      details: error.message 
+    });
+  }
+});
+*/
+
+// Test client details endpoint without authentication
+// DISABLED - Using frontend static data only  
+/*
+app.get('/api/clients/test/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    const { data: client, error } = await supabase
+      .from('clients')
+      .select('*')
+      .eq('id', id)
+      .single();
+      
+    if (error) throw error;
+    
+    // Transform client data for frontend
+    const transformedClient = {
+      id: client.id,
+      name: `${client.first_name || ''} ${client.last_name || ''}`.trim() || 'Unknown Client',
+      first_name: client.first_name,
+      last_name: client.last_name,
+      email: client.email,
+      budget: client.budget || 'Not specified',
+      timeline: client.timeline || 'Not specified',
+      status: client.status || 'Active',
+      preferences: client.preferences,
+      state: client.state || 'VA'
+    };
+    
+    res.json({ 
+      success: true, 
+      data: transformedClient 
+    });
+    
+  } catch (error) {
+    console.error('Error fetching test client details:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Error fetching client details',
+      details: error.message 
+    });
+  }
+});
+*/
+
+// Get individual client details for copilot
+app.get('/api/clients/:id', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { id } = req.params;
+    
+    // Fetch specific client from Supabase
+    const { data, error } = await supabase
+      .from('clients')
+      .select('*')
+      .eq('id', id)
+      .eq('agent_id', userId)
+      .single();
+    
+    if (error) {
+      console.error('Client fetch error:', error);
+      return res.status(404).json({ 
+        success: false, 
+        error: 'Client not found',
+        details: error.message 
+      });
+    }
+    
+    res.json({ 
+      success: true, 
+      data: data || {} 
+    });
+  } catch (e) {
+    console.error('Client details API error:', e);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Internal server error', 
+      details: e.message 
+    });
+  }
+});
+
+// Fetch clients for copilot client management
+app.get('/api/clients', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    
+    // Fetch clients from Supabase
+    const { data, error } = await supabase
+      .from('clients')
+      .select('*')
+      .eq('agent_id', userId)
+      .order('created_at', { ascending: false });
+    
+    if (error) {
+      console.error('Clients fetch error:', error);
+      return res.status(500).json({ 
+        success: false, 
+        error: 'Failed to fetch clients',
+        details: error.message 
+      });
+    }
+    
+    res.json({ 
+      success: true, 
+      data: data || [] 
+    });
+  } catch (e) {
+    console.error('Clients API error:', e);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Internal server error', 
+      details: e.message 
+    });
+  }
 });
 
 // Lightweight contracts templates API (optional DB-backed; returns [] if not configured)
@@ -1929,549 +3713,41 @@ app.post('/api/upload-client-notes', authenticateToken, upload.single('file'), a
   }
 });
 
-// Test DocuSign configuration endpoint
-app.get('/api/docusign/test-config', async (req, res) => {
+// Get authentication status
+app.get('/api/auth/status', authenticateToken, async (req, res) => {
   try {
-    console.log('🧪 Testing DocuSign configuration...');
-    
-    // Test JWT creation
-    const { createJwtAssertion } = require('./docusign-config');
-    const jwt = createJwtAssertion();
-    console.log('✅ JWT created successfully');
-    
-    // Test access token
-    const { getAccessToken } = require('./docusign-config');
-    const accessToken = await getAccessToken();
-    console.log('✅ Access token received:', accessToken ? 'YES' : 'NO');
-    
-    // Test client creation
-    const { createDocuSignClient } = require('./docusign-config');
-    const apiClient = await createDocuSignClient();
-    console.log('✅ DocuSign client created successfully');
-    
-    res.json({
-      success: true,
-      message: 'DocuSign configuration is working correctly',
-      hasAccessToken: !!accessToken,
-      hasClient: !!apiClient
-    });
-  } catch (error) {
-    console.error('❌ DocuSign configuration test failed:', error.message);
-    res.status(500).json({
-      success: false,
-      error: 'DocuSign configuration test failed',
-      details: error.message
-    });
-  }
-});
+    // If authenticateToken middleware passes, the user is authenticated
+    const { data: user, error } = await supabase
+      .from('users')
+      .select('id, email, first_name, last_name')
+      .eq('id', req.user.userId)
+      .single();
 
-// ===== DOCUSIGN INTEGRATION ENDPOINTS =====
-
-// Get DocuSign consent URL
-app.get('/api/docusign/consent', authenticateToken, (req, res) => {
-  try {
-    const consentUrl = generateConsentUrl();
-    res.json({
-      success: true,
-      data: {
-        consentUrl: consentUrl
-      }
-    });
-  } catch (error) {
-    console.error('Error generating consent URL:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to generate consent URL',
-      details: error.message
-    });
-  }
-});
-
-// DocuSign consent callback
-app.get('/api/docusign/consent-callback', (req, res) => {
-  const { code } = req.query;
-  
-  if (!code) {
-    // Send error message to parent window
-    const errorHtml = `
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>DocuSign Authorization</title>
-        </head>
-        <body>
-          <script>
-            if (window.opener) {
-              window.opener.postMessage({
-                type: 'DOCUSIGN_CONSENT_ERROR',
-                error: 'Authorization code is required'
-              }, 'http://localhost:3000');
-              window.close();
-            } else {
-              window.location.href = 'http://localhost:3000/dashboard?error=consent_failed';
-            }
-          </script>
-          <p>Authorization failed. Redirecting...</p>
-        </body>
-      </html>
-    `;
-    return res.send(errorHtml);
-  }
-  
-  // In a real implementation, you would exchange the code for an access token
-  // For now, we'll send a success message to the parent window
-  const successHtml = `
-    <!DOCTYPE html>
-    <html>
-      <head>
-        <title>DocuSign Authorization</title>
-      </head>
-      <body>
-        <script>
-          if (window.opener) {
-            window.opener.postMessage({
-              type: 'DOCUSIGN_CONSENT_SUCCESS',
-              code: '${code}'
-            }, 'http://localhost:3000');
-            window.close();
-          } else {
-            window.location.href = 'http://localhost:3000/dashboard?consent=success&code=${code}';
-          }
-        </script>
-        <p>Authorization successful! Closing window...</p>
-      </body>
-    </html>
-  `;
-  
-  res.send(successHtml);
-});
-
-// Create DocuSign envelope with modified contract
-app.post('/api/docusign/create-envelope', authenticateToken, async (req, res) => {
-  try {
-    const { contractContent, clientName, clientEmail, subject } = req.body;
-    const userId = req.user.userId;
-
-    if (!contractContent || !clientName || !clientEmail) {
-      return res.status(400).json({
-        success: false,
-        error: 'contractContent, clientName, and clientEmail are required'
-      });
-    }
-
-    // Create DocuSign client
-    let envelopesApi;
-    let useMock = false;
-    
-    try {
-      console.log('🔐 Attempting to create real DocuSign client...');
-      const apiClient = await createDocuSignClient();
-      envelopesApi = new (require('docusign-esign').EnvelopesApi)(apiClient);
-      console.log('✅ Real DocuSign client created successfully');
-    } catch (error) {
-      console.error('❌ DocuSign client creation error:', error.message);
-      console.error('Full error details:', error);
-      
-      // Check if consent is required
-      if (error.message === 'consent_required') {
-        return res.status(401).json({
-          success: false,
-          error: 'consent_required',
-          message: 'DocuSign consent is required. Please authorize the application first.'
-        });
-      }
-      
-      // For now, let's force real DocuSign usage and not fall back to mock
-      console.error('🚫 DocuSign authentication failed. Please check your configuration.');
-      return res.status(500).json({
-        success: false,
-        error: 'DocuSign authentication failed',
-        details: error.message,
-        message: 'Please ensure DocuSign is properly configured and authorized.'
-      });
-      
-      // Uncomment the lines below if you want to use mock for testing
-      // console.log('🔧 Using mock DocuSign service for testing...');
-      // const mockClient = new MockDocuSignClient();
-      // envelopesApi = mockClient.envelopesApi;
-      // useMock = true;
-    }
-
-    // Create document
-    const document = {
-      documentBase64: Buffer.from(contractContent).toString('base64'),
-      name: 'Contract Document',
-      fileExtension: 'txt',
-      documentId: '1'
-    };
-
-    // Create recipient
-    const signer = {
-      email: clientEmail,
-      name: clientName,
-      recipientId: '1',
-      routingOrder: '1'
-    };
-
-    // Create sign here tab
-    const signHereTab = {
-      anchorString: '/sn1/',
-      anchorUnits: 'pixels',
-      anchorYOffset: '10',
-      anchorXOffset: '20'
-    };
-
-    // Create recipient view
-    // Prepare sender view (embedded sending) so the agent can place fields and send
-    const returnUrlRequest = {
-      returnUrl: 'http://localhost:3000/dashboard?envelopeId={envelopeId}'
-    };
-
-    // Create envelope definition
-    const envelopeDefinition = {
-      emailSubject: subject || 'Contract for Signature - AgentHub',
-      documents: [document],
-      recipients: {
-        signers: [signer]
-      },
-      status: 'created'
-    };
-
-    // Create envelope
-    const envelope = await envelopesApi.createEnvelope(DOCUSIGN_CONFIG.account_id, {
-      envelopeDefinition: envelopeDefinition
-    });
-
-    // Create sender view (embedded sending) for placing tabs and sending the envelope
-    const senderView = await envelopesApi.createSenderView(
-      DOCUSIGN_CONFIG.account_id,
-      envelope.envelopeId,
-      { returnUrlRequest }
-    );
-
-    // Save envelope info to database
-    try {
-      const { error: dbError } = await supabase
-        .from('docusign_envelopes')
-        .insert([
-          {
-            agent_id: userId,
-            envelope_id: envelope.envelopeId,
-            client_name: clientName,
-            client_email: clientEmail,
-            contract_content: contractContent,
-            status: 'created',
-            created_at: new Date().toISOString()
-          }
-        ]);
-
-      if (dbError) {
-        console.error('Error saving envelope to database:', dbError);
-        // Don't fail the request if database save fails
-      }
-    } catch (dbError) {
-      console.error('Database save failed (tables may not exist):', dbError.message);
-      // Continue with the response even if database save fails
-    }
+    if (error) throw error;
 
     res.json({
       success: true,
-      data: {
-        envelopeId: envelope.envelopeId,
-        senderViewUrl: senderView.url,
-        status: envelope.status
+      isAuthenticated: true,
+      user: {
+        id: user.id,
+        email: user.email,
+        firstName: user.first_name,
+        lastName: user.last_name,
       }
     });
-
   } catch (error) {
-    console.error('Error creating DocuSign envelope:', error);
-    res.status(500).json({
+    // This will catch errors if the token is valid but the user is not in the DB
+    // Or if there's a DB connection issue.
+    console.error('Auth status error:', error);
+    res.status(404).json({
       success: false,
-      error: 'Failed to create DocuSign envelope',
+      isAuthenticated: false,
+      error: 'User not found or database error',
       details: error.message
     });
   }
 });
-
-// Get envelope status
-app.get('/api/docusign/envelope/:envelopeId', authenticateToken, async (req, res) => {
-  try {
-    const { envelopeId } = req.params;
-    const userId = req.user.userId;
-
-    // Create DocuSign client (using mock for testing)
-    let envelopesApi;
-    try {
-      const apiClient = await createDocuSignClient();
-      envelopesApi = new (require('docusign-esign').EnvelopesApi)(apiClient);
-    } catch (error) {
-      console.log('🔧 Using mock DocuSign service for testing...');
-      const mockClient = new MockDocuSignClient();
-      envelopesApi = mockClient.envelopesApi;
-    }
-
-    // Get envelope status
-    const envelope = await envelopesApi.getEnvelope(DOCUSIGN_CONFIG.account_id, envelopeId);
-
-    res.json({
-      success: true,
-      data: {
-        envelopeId: envelope.envelopeId,
-        status: envelope.status,
-        created: envelope.created,
-        lastModified: envelope.lastModified
-      }
-    });
-
-  } catch (error) {
-    console.error('Error getting envelope status:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to get envelope status',
-      details: error.message
-    });
-  }
-});
-
-// Get user's DocuSign envelopes
-app.get('/api/docusign/envelopes', authenticateToken, async (req, res) => {
-  try {
-    const userId = req.user.userId;
-
-    // Get envelopes from database (optional - don't fail if tables don't exist)
-    try {
-      const { data, error } = await supabase
-        .from('docusign_envelopes')
-        .select('*')
-        .eq('agent_id', userId)
-        .order('created_at', { ascending: false });
-
-      if (error) {
-        console.error('Supabase error:', error);
-        res.json({
-          success: true,
-          data: []
-        });
-        return;
-      }
-
-      res.json({
-        success: true,
-        data: data || []
-      });
-
-    } catch (dbError) {
-      console.error('Database query failed (tables may not exist):', dbError.message);
-      res.json({
-        success: true,
-        data: []
-      });
-    }
-
-  } catch (error) {
-    console.error('Error getting envelopes:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to get envelopes',
-      details: error.message
-    });
-  }
-});
-
-// Mock DocuSign signing page
-app.get('/mock-docusign-signing', (req, res) => {
-  const { envelopeId, clientName, clientEmail } = req.query;
   
-  const html = `
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DocuSign - Electronic Signature</title>
-    <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            margin: 0;
-            padding: 20px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-        .signing-container {
-            background: white;
-            border-radius: 12px;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
-            padding: 40px;
-            max-width: 600px;
-            width: 100%;
-            text-align: center;
-        }
-        .logo {
-            width: 120px;
-            height: 40px;
-            background: #0070c9;
-            border-radius: 6px;
-            margin: 0 auto 30px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-weight: bold;
-            font-size: 18px;
-        }
-        h1 {
-            color: #333;
-            margin-bottom: 10px;
-            font-size: 24px;
-        }
-        .subtitle {
-            color: #666;
-            margin-bottom: 30px;
-            font-size: 16px;
-        }
-        .document-preview {
-            background: #f8f9fa;
-            border: 2px dashed #dee2e6;
-            border-radius: 8px;
-            padding: 30px;
-            margin: 20px 0;
-            min-height: 200px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            flex-direction: column;
-        }
-        .document-icon {
-            font-size: 48px;
-            color: #6c757d;
-            margin-bottom: 15px;
-        }
-        .signature-area {
-            border: 2px solid #0070c9;
-            border-radius: 8px;
-            padding: 20px;
-            margin: 20px 0;
-            background: #f8f9ff;
-        }
-        .signature-input {
-            width: 100%;
-            padding: 15px;
-            border: 1px solid #ddd;
-            border-radius: 6px;
-            font-size: 16px;
-            margin: 10px 0;
-        }
-        .btn {
-            background: #0070c9;
-            color: white;
-            border: none;
-            padding: 15px 30px;
-            border-radius: 6px;
-            font-size: 16px;
-            font-weight: bold;
-            cursor: pointer;
-            margin: 10px;
-            transition: background 0.3s;
-        }
-        .btn:hover {
-            background: #0056b3;
-        }
-        .btn-secondary {
-            background: #6c757d;
-        }
-        .btn-secondary:hover {
-            background: #545b62;
-        }
-        .info {
-            background: #e7f3ff;
-            border: 1px solid #b3d9ff;
-            border-radius: 6px;
-            padding: 15px;
-            margin: 20px 0;
-            color: #0056b3;
-        }
-        .status {
-            background: #d4edda;
-            border: 1px solid #c3e6cb;
-            border-radius: 6px;
-            padding: 15px;
-            margin: 20px 0;
-            color: #155724;
-            display: none;
-        }
-    </style>
-</head>
-<body>
-    <div class="signing-container">
-        <div class="logo">DocuSign</div>
-        <h1>Electronic Signature</h1>
-        <p class="subtitle">Please review and sign the document below</p>
-        
-        <div class="info">
-            <strong>Envelope ID:</strong> ${envelopeId}<br>
-            <strong>Client:</strong> ${clientName} (${clientEmail})
-        </div>
-        
-        <div class="document-preview">
-            <div class="document-icon">📄</div>
-            <h3>Contract Document</h3>
-            <p>This is a mock document for testing purposes.</p>
-            <p>The actual contract content would be displayed here.</p>
-        </div>
-        
-        <div class="signature-area">
-            <h3>📝 Signature Required</h3>
-            <input type="text" class="signature-input" id="signature" placeholder="Type your full name to sign" />
-            <input type="email" class="signature-input" id="email" placeholder="Confirm your email address" value="${clientEmail}" />
-        </div>
-        
-        <div>
-            <button class="btn" onclick="signDocument()">✅ Sign Document</button>
-            <button class="btn btn-secondary" onclick="declineDocument()">❌ Decline</button>
-        </div>
-        
-        <div class="status" id="status">
-            Document signed successfully! Redirecting...
-        </div>
-    </div>
-
-    <script>
-        function signDocument() {
-            const signature = document.getElementById('signature').value;
-            const email = document.getElementById('email').value;
-            
-            if (!signature || !email) {
-                alert('Please fill in both signature and email fields.');
-                return;
-            }
-            
-            document.getElementById('status').style.display = 'block';
-            document.querySelectorAll('.btn').forEach(btn => btn.disabled = true);
-            
-            // Simulate signing process
-            setTimeout(() => {
-                alert('Document signed successfully! This is a mock signing interface.');
-                // In a real implementation, this would redirect back to the main app
-                window.parent.postMessage({ type: 'DOCUSIGN_SIGNED', envelopeId: '${envelopeId}' }, '*');
-            }, 2000);
-        }
-        
-        function declineDocument() {
-            if (confirm('Are you sure you want to decline this document?')) {
-                alert('Document declined. This is a mock signing interface.');
-                window.parent.postMessage({ type: 'DOCUSIGN_DECLINED', envelopeId: '${envelopeId}' }, '*');
-            }
-        }
-    </script>
-</body>
-</html>`;
-  
-  res.send(html);
-});
-
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
-}); 
+});

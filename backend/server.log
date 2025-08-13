@@ -1,0 +1,55 @@
+Server running on port 3001
+Could not fetch client data for action: invalid input syntax for type uuid: "test-client-123"
+chat_actions execute insert error: undefined
+Could not fetch client data for action: invalid input syntax for type uuid: "test-client-123"
+chat_actions execute insert error: undefined
+Could not fetch client data for action: invalid input syntax for type uuid: "test-client-123"
+chat_actions execute insert error: undefined
+chat history fetch error: relation "public.chat_messages" does not exist
+chat history fetch error: relation "public.chat_messages" does not exist
+Could not fetch client data for action: JSON object requested, multiple (or no) rows returned
+chat_actions execute insert error: undefined
+chat history fetch error: relation "public.chat_messages" does not exist
+chat history fetch error: relation "public.chat_messages" does not exist
+chat history fetch error: relation "public.chat_messages" does not exist
+chat history fetch error: relation "public.chat_messages" does not exist
+chat history fetch error: relation "public.chat_messages" does not exist
+chat history fetch error: relation "public.chat_messages" does not exist
+chat history fetch error: relation "public.chat_messages" does not exist
+Could not fetch client data for action: JSON object requested, multiple (or no) rows returned
+chat_actions execute insert error: undefined
+Could not fetch client data for action: JSON object requested, multiple (or no) rows returned
+chat_actions execute insert error: undefined
+Could not fetch client data for action: JSON object requested, multiple (or no) rows returned
+chat_actions execute insert error: undefined
+chat history fetch error: relation "public.chat_messages" does not exist
+chat history fetch error: relation "public.chat_messages" does not exist
+chat history fetch error: relation "public.chat_messages" does not exist
+Could not fetch client data for action: JSON object requested, multiple (or no) rows returned
+chat_actions execute insert error: undefined
+chat history fetch error: relation "public.chat_messages" does not exist
+chat history fetch error: relation "public.chat_messages" does not exist
+Could not fetch client data for action: JSON object requested, multiple (or no) rows returned
+chat_actions execute insert error: undefined
+chat history fetch error: relation "public.chat_messages" does not exist
+Could not fetch client data for action: JSON object requested, multiple (or no) rows returned
+chat_actions execute insert error: undefined
+Could not fetch client data for action: JSON object requested, multiple (or no) rows returned
+chat_actions execute insert error: undefined
+Could not fetch client data for action: JSON object requested, multiple (or no) rows returned
+chat_actions execute insert error: undefined
+Could not fetch client data for action: JSON object requested, multiple (or no) rows returned
+chat_actions execute insert error: undefined
+Could not fetch client data for action: JSON object requested, multiple (or no) rows returned
+chat_actions execute insert error: undefined
+chat history fetch error: relation "public.chat_messages" does not exist
+chat history fetch error: relation "public.chat_messages" does not exist
+Could not fetch client data for action: JSON object requested, multiple (or no) rows returned
+chat_actions execute insert error: undefined
+chat history fetch error: relation "public.chat_messages" does not exist
+Could not fetch client data for action: JSON object requested, multiple (or no) rows returned
+chat_actions execute insert error: undefined
+Could not fetch client data for action: JSON object requested, multiple (or no) rows returned
+chat_actions execute insert error: undefined
+Could not fetch client data for action: JSON object requested, multiple (or no) rows returned
+chat_actions execute insert error: undefined
