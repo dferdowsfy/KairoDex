@@ -1,0 +1,13 @@
+{
+  "name": "NestAI",
+  "short_name": "NestAI",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0E1117",
+  "theme_color": "#0F66FF",
+  "description": "Mobile-first AI-native real estate CRM",
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

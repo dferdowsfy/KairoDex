@@ -1,1 +1,0 @@
-import{g as n}from"./assets/supabaseClient-jzzwAuCW.js";chrome.runtime.onInstalled.addListener(()=>{chrome.alarms.create("agenthub-sync-ping",{periodInMinutes:60})});chrome.alarms.onAlarm.addListener(e=>{e.name});chrome.runtime.onMessage.addListener((e,s,r)=>!1);n().catch(()=>{});

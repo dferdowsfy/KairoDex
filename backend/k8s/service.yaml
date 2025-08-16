@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: agenthub-api
+  labels:
+    app: agenthub-api
+spec:
+  type: ClusterIP
+  selector:
+    app: agenthub-api
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 3000
