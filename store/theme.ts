@@ -15,6 +15,7 @@ export interface ThemeColors {
   ink: string
   surface: string
   card: string
+  pageBg?: string // CSS color or gradient for page background
 }
 
 const PRESETS: Record<ThemeName, ThemeColors> = {
@@ -29,7 +30,8 @@ const PRESETS: Record<ThemeName, ThemeColors> = {
     dangerSoft: '#FEE2E2',
     ink: '#0F172A',
     surface: '#F6F7FB',
-    card: '#FFFFFF'
+  card: '#FFFFFF',
+  pageBg: 'linear-gradient(180deg, #ffffff 0%, var(--surface) 100%)'
   },
   ocean: {
     primary: '#0EA5E9',
@@ -42,7 +44,8 @@ const PRESETS: Record<ThemeName, ThemeColors> = {
     dangerSoft: '#FFE4E6',
     ink: '#0C4A6E',
     surface: '#ECFEFF',
-    card: '#FFFFFF'
+  card: '#FFFFFF',
+  pageBg: 'linear-gradient(180deg, #ffffff 0%, var(--surface) 100%)'
   },
   sunset: {
     primary: '#F97316',
@@ -55,7 +58,8 @@ const PRESETS: Record<ThemeName, ThemeColors> = {
     dangerSoft: '#FEE2E2',
     ink: '#1F2937',
     surface: '#FFF7ED',
-    card: '#FFFFFF'
+  card: '#FFFFFF',
+  pageBg: 'linear-gradient(180deg, #ffffff 0%, var(--surface) 100%)'
   },
   forest: {
     primary: '#22C55E',
@@ -68,7 +72,8 @@ const PRESETS: Record<ThemeName, ThemeColors> = {
     dangerSoft: '#FEE2E2',
     ink: '#052E16',
     surface: '#F0FDF4',
-    card: '#FFFFFF'
+  card: '#FFFFFF',
+  pageBg: 'linear-gradient(180deg, #ffffff 0%, var(--surface) 100%)'
   },
   grape: {
     primary: '#8B5CF6',
@@ -81,7 +86,8 @@ const PRESETS: Record<ThemeName, ThemeColors> = {
     dangerSoft: '#FFE4E6',
     ink: '#1E1B4B',
     surface: '#F5F3FF',
-    card: '#FFFFFF'
+  card: '#FFFFFF',
+  pageBg: 'linear-gradient(180deg, #ffffff 0%, var(--surface) 100%)'
   },
   rose: {
     primary: '#FB7185',
@@ -94,7 +100,8 @@ const PRESETS: Record<ThemeName, ThemeColors> = {
     dangerSoft: '#FFE4E6',
     ink: '#3B0D1E',
     surface: '#FFF1F2',
-    card: '#FFFFFF'
+  card: '#FFFFFF',
+  pageBg: 'linear-gradient(180deg, #ffffff 0%, var(--surface) 100%)'
   }
 }
 
@@ -113,6 +120,9 @@ function applyTheme(colors: ThemeColors, name: ThemeName) {
   root.style.setProperty('--ink', colors.ink)
   root.style.setProperty('--surface', colors.surface)
   root.style.setProperty('--card', colors.card)
+  // background can be a plain color or any valid CSS gradient
+  const bg = colors.pageBg || 'linear-gradient(180deg, #ffffff 0%, var(--surface) 100%)'
+  root.style.setProperty('--page-bg', bg)
 }
 
 interface ThemeState {

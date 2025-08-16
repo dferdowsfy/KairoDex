@@ -36,6 +36,16 @@ export default function ProfilePage() {
       <section>
         <h2 className="text-sm font-medium text-slate-700 mb-2">Custom colors</h2>
         <div className="bg-white rounded-2xl border border-slate-200 p-3 space-y-3">
+          <div className="flex items-center gap-3">
+            <label className="w-32 text-sm text-slate-600">Page background</label>
+            <input
+              type="text"
+              className="flex-1 h-9 rounded border border-slate-300 px-2 text-sm"
+              placeholder="CSS color or gradient, e.g. linear-gradient(180deg,#fff,var(--surface))"
+              value={colors.pageBg || ''}
+              onChange={(e) => setColors({ pageBg: e.target.value })}
+            />
+          </div>
           {([
             ['primary','Primary'],
             ['primarySoft','Primary soft'],

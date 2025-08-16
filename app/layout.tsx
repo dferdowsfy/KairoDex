@@ -29,7 +29,7 @@ export const dynamic = 'force-dynamic'
 export default function RootLayout({ children }: { children: any }) {
   return (
     <html lang="en" className={`${inter.variable} ${sora.variable}`}>
-  <body className="min-h-screen bg-gradient-to-b from-white to-[color:var(--surface)] text-slate-800">
+  <body className="min-h-screen text-slate-800" style={{ background: 'var(--page-bg)' }}>
         <Providers>
           <ThemeApplier />
           {/* Dev-only: ensure PWA service worker doesn't hijack dev server */}
