@@ -31,7 +31,15 @@ const withPWA = nextPWA({
 /** @type {import('next').NextConfig} */
 const config = {
   // Disable optimizePackageImports to avoid rare dev-time chunk resolution issues
-  experimental: {}
+  experimental: {},
+  images: {
+    remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: 'images.unsplash.com'
+      }
+    ]
+  }
 };
 
 export default withPWA(config);

@@ -67,6 +67,20 @@ export async function fetchSheetRows(): Promise<SheetRow[]> {
   })
 }
 
+// Returns the header and the remaining rows as raw arrays for index-based access
+export async function fetchSheetGrid(): Promise<{ header: string[]; rows: string[][] }> {
+  const url = getCsvUrl()
+  if (!url) throw new Error('Missing GOOGLE_SHEETS_PUBLIC_CSV_URL or GOOGLE_SHEETS_ID env')
+  const resp = await fetch(url, { cache: 'no-store' })
+  if (!resp.ok) throw new Error(`Failed to fetch sheet CSV: ${resp.status} ${resp.statusText}`)
+  const text = await resp.text()
+  const grid = parseCsv(text)
+  if (grid.length === 0) return { header: [], rows: [] }
+  const header = grid[0].map(h => h.trim())
+  const rows = grid.slice(1).map(r => r.map(c => (c ?? '').trim()))
+  return { header, rows }
+}
+
 // Attempt to locate the sheet row for a given client id by matching id/email/name
 export async function findSheetRowForClientId(clientId: string): Promise<SheetRow | null> {
   const rows = await fetchSheetRows()
@@ -98,6 +112,37 @@ export async function findSheetRowByHints(hints: { id?: string; email?: string; 
     }
   }
   return null
+}
+
+// Normalize common column names to get a client's preferred contact method value, if present.
+export function getPreferredContactMethod(row: SheetRow | null | undefined): string {
+  if (!row) return ''
+  const candidates = [
+    'preferred_contact_method', 'preferred contact method', 'preferred_contact', 'preferred contact',
+    'preferred_communication', 'preferred communication',
+    'preferred_channel', 'preferred channel',
+    'contact_preference', 'contact preference',
+    'communication_preference', 'communication preference',
+    'preferred_method', 'preferred method'
+  ]
+  const keys = Object.keys(row as any)
+  for (const k of keys) {
+    const kn = k.trim().toLowerCase()
+    if (candidates.includes(kn)) {
+      const val = String((row as any)[k] ?? '').trim()
+      if (val) return val
+    }
+  }
+  return ''
+}
+
+// Collapse the preferred contact value into one of: 'SMS' | 'phone' | 'email'
+export function inferPreferredMethod(row: SheetRow | null | undefined): 'SMS' | 'phone' | 'email' {
+  const raw = getPreferredContactMethod(row).toLowerCase()
+  if (/(sms|text|txt)/i.test(raw)) return 'SMS'
+  if (/(phone|call|voice)/i.test(raw)) return 'phone'
+  // default
+  return 'email'
 }
 
 // Map a sheet row to our client shape (best-effort). Unrecognized fields are kept as metadata.

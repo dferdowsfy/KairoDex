@@ -21,7 +21,7 @@ export default function InstallHint() {
       <div className="flex items-center gap-3">
         <span>Install NestAI for a native feel.</span>
         <button className="ml-auto bg-primary text-white px-3 py-1 rounded-lg" onClick={async() => { await prompt?.prompt(); setVisible(false)}}>Install</button>
-        <button className="text-gray-400" onClick={() => setVisible(false)}>Later</button>
+  <button className="text-ink/50" onClick={() => setVisible(false)}>Later</button>
       </div>
     </div>
   )

@@ -1,13 +1,14 @@
 export const runtime = 'edge'
 
 // Minimal pass-through to US Census Counties API to avoid CORS issues in browsers
-// GET /api/geo/counties?state=06  (FIPS 2-digit)
+// GET /api/geo/counties?state=24  (FIPS 2-digit for Maryland)
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url)
   const state = searchParams.get('state')
   if (!state) return new Response(JSON.stringify({ error: 'Missing state FIPS' }), { status: 400 })
   try {
-    const url = `https://api.census.gov/data/2023/pep/population?get=NAME&for=county:*&in=state:${encodeURIComponent(state)}`
+    // Use 2019 Census API which supports county-level data
+    const url = `https://api.census.gov/data/2019/pep/population?get=NAME&for=county:*&in=state:${encodeURIComponent(state)}`
     const resp = await fetch(url, { cache: 'no-store' })
     if (!resp.ok) throw new Error(`Census error ${resp.status}`)
     const json = await resp.json() as any[]

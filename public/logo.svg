@@ -1,11 +1,40 @@
-<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64' fill='none'>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 56" fill="none" role="img">
   <defs>
-    <linearGradient id='g' x1='0' x2='1'>
-      <stop offset='0%' stop-color='#0F66FF'/>
-      <stop offset='100%' stop-color='#10B981'/>
+    <filter id="haloCyan" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="3" result="g"/>
+      <feColorMatrix in="g" type="matrix" values="0 0 0 0 0.133  0 0 0 0 0.827  0 0 0 0 0.933  0 0 0 0.25 0"/>
+    </filter>
+    <filter id="glowMagenta" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="1.6" result="m"/>
+      <feColorMatrix in="m" type="matrix" values="0 0 0 0 0.925  0 0 0 0 0.282  0 0 0 0 0.600  0 0 0 1 0"/>
+    </filter>
+    <filter id="glowBlue" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="0.8" result="b"/>
+      <feMerge>
+        <feMergeNode in="b"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <linearGradient id="word" x1="0" x2="1">
+      <stop offset="0%" stop-color="#2563EB"/>
+      <stop offset="100%" stop-color="#EC4899"/>
     </linearGradient>
   </defs>
-  <rect width='64' height='64' rx='12' fill='#0E1117'/>
-  <path d='M10 36L32 14l22 22v12H10V36z' stroke='url(#g)' stroke-width='4' fill='rgba(15,102,255,0.08)'/>
-  <circle cx='32' cy='36' r='10' stroke='#0F66FF' stroke-width='3' fill='rgba(16,185,129,0.1)'/>
+  <!-- Halo -->
+  <g filter="url(#haloCyan)">
+    <path d="M24 32L48 12l24 20v12H24V32z" fill="#22D3EE" opacity="0.06"/>
+  </g>
+  <!-- Magenta edge glow -->
+  <g filter="url(#glowMagenta)">
+    <path d="M24 32L48 12l24 20v12H24V32z" fill="none" stroke="#EC4899" stroke-width="2" opacity="0.5"/>
+  </g>
+  <!-- Electric blue glow + crisp white inner lines -->
+  <g filter="url(#glowBlue)">
+    <path d="M24 32L48 12l24 20v12H24V32z M36 44V30h24v14" stroke="#2563EB" stroke-width="2.5" fill="none"/>
+    <path d="M24 32L48 12l24 20v12H24V32z M36 44V30h24v14" stroke="#FFFFFF" stroke-width="1.25" fill="none"/>
+  </g>
+  <!-- Wordmark -->
+  <g transform="translate(90, 13)">
+    <text x="0" y="24" font-family="Sora, Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-weight="800" font-size="28" fill="#FFFFFF">AgentHub</text>
+  </g>
 </svg>

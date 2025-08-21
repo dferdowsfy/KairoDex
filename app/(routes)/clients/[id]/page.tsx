@@ -4,9 +4,11 @@ import { useParams } from 'next/navigation'
 import { useClient } from '@/hooks/useClient'
 import { useQuery } from '@tanstack/react-query'
 import { useState, useEffect } from 'react'
+import { useUI } from '@/store/ui'
 import { US_STATES } from '@/lib/us'
 import { getContractsForJurisdiction, type ContractTemplate } from '@/lib/contracts'
 import { PhoneCall, Mail, Calendar, Wallet, House, Landmark, Phone, BarChart2, NotebookPen, ChevronDown } from 'lucide-react'
+import { getPreferredContactMethod } from '@/lib/sheets'
 
 interface SheetRow {
   [key: string]: string | number | boolean | null
@@ -16,6 +18,7 @@ export default function ClientDetailPage() {
   const params = useParams<{ id: string }>()
   const id = params?.id as string
   const { data: client } = useClient(id)
+  const { setSelectedClientId } = useUI()
   
   // Get sheet data for this specific client via API (avoids client-side env access)
   const { data: sheetRow, error } = useQuery({
@@ -47,7 +50,7 @@ export default function ClientDetailPage() {
   const [contracts, setContracts] = useState<ContractTemplate[]>([])
   const [selectedContractId, setSelectedContractId] = useState<string>('')
   const [changeText, setChangeText] = useState('')
-  const [openAmend, setOpenAmend] = useState(false)
+  const [openAmend, setOpenAmend] = useState(true)
 
   const hasError = !!error
   const loading = !client || !sheetRow
@@ -59,7 +62,7 @@ export default function ClientDetailPage() {
   const budgetMax = !loading ? (sheetRow['budget_max'] as string || '') : ''
   const style = !loading ? ((sheetRow['style'] as string) || (sheetRow['property_style'] as string) || '') : ''
   const financing = !loading ? ((sheetRow['financing'] as string) || (sheetRow['financing_type'] as string) || '') : ''
-  const preferredComm = !loading ? ((sheetRow['preferred_communication'] as string) || (sheetRow['preferred_channel'] as string) || '') : ''
+  const preferredComm = !loading ? (getPreferredContactMethod(sheetRow) || '') : ''
   const notes = !loading ? (sheetRow['notes'] as string || '') : ''
   const email = !loading ? ((sheetRow['email'] as string) || client.email || '') : ''
   const phone = !loading ? ((sheetRow['phone'] as string) || client.phone || '') : ''
@@ -84,6 +87,7 @@ export default function ClientDetailPage() {
 
   // Reset local UI state when client id changes to avoid stale UI when switching clients
   useEffect(() => {
+  setSelectedClientId(id)
     setFollowupLoading(false)
     setFollowupDraft(null)
     setAmendLoading(false)
@@ -95,8 +99,8 @@ export default function ClientDetailPage() {
     setContracts([])
     setSelectedContractId('')
     setChangeText('')
-    setOpenAmend(false)
-  }, [id])
+  setOpenAmend(true)
+  }, [id, setSelectedClientId])
 
   async function handleGenerateFollowup() {
     try {
@@ -177,7 +181,7 @@ export default function ClientDetailPage() {
   }, [stateCode, countyFips])
 
   return (
-    <main key={id} className="min-h-screen bg-gray-50">
+  <main key={id} className="min-h-screen" style={{ background: 'var(--page-bg)' }}>
       <div className="max-w-7xl mx-auto p-6 space-y-6">
         {hasError && (
           <div className="text-center py-12">
@@ -186,107 +190,128 @@ export default function ClientDetailPage() {
         )}
         {loading && !hasError && (
           <div className="text-center py-12">
-            <div className="text-lg text-gray-600">Loading client dashboard...</div>
+            <div className="text-lg text-ink/70">Loading client dashboard...</div>
           </div>
         )}
         {!loading && !hasError && (
         <>
         
-        {/* Client Header */}
-        <div className="text-center mb-8">
-          <h1 className="text-4xl font-bold text-gray-800 mb-2">{clientName}</h1>
-          <div className="inline-flex items-center px-4 py-2 rounded-full bg-white/80 backdrop-blur-sm border border-gray-200 shadow-sm">
-            <div className="w-3 h-3 bg-green-400 rounded-full mr-2"></div>
-            <span className="text-sm font-medium text-gray-700 capitalize">{status.replace('_', ' ')}</span>
+        {/* Client Header with actions on the right */}
+        <div className="mb-8 lh-section-loose">
+          <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between text-center lg:text-left gap-3">
+            <div>
+              <h1 className="sf-display h1 text-white mb-2">{clientName}</h1>
+              <div className="inline-flex items-center px-4 py-2 pill capitalize" style={{ background: 'rgba(37,99,235,0.18)', color: '#BFDBFE' }}>
+                <div className="w-2.5 h-2.5 bg-primary rounded-full mr-2"></div>
+                <span>{status.replace('_', ' ')}</span>
+              </div>
+            </div>
+            <div className="flex items-center justify-center lg:justify-end gap-2">
+              <a
+                href={telHref || undefined}
+                aria-disabled={!telHref}
+                className={`inline-flex items-center gap-2 rounded-full px-3 py-2 border text-white/90 bg-white/10 border-white/20 hover:bg-white/15 transition ${telHref ? '' : 'opacity-50 cursor-not-allowed pointer-events-none'}`}
+              >
+                <PhoneCall className="w-4 h-4" />
+                <span className="sf-text text-sm">Call Client</span>
+              </a>
+              <a
+                href={mailtoHref || undefined}
+                aria-disabled={!mailtoHref}
+                className={`inline-flex items-center gap-2 rounded-full px-3 py-2 border text-white/90 bg-white/10 border-white/20 hover:bg-white/15 transition ${mailtoHref ? '' : 'opacity-50 cursor-not-allowed pointer-events-none'}`}
+              >
+                <Mail className="w-4 h-4" />
+                <span className="sf-text text-sm">Send Email</span>
+              </a>
+              <a
+                href="/tasks?quick=calls"
+                className="inline-flex items-center gap-2 rounded-full px-3 py-2 border text-white bg-white/10 border-white/20 hover:bg-white/15 transition"
+              >
+                <Calendar className="w-4 h-4" />
+                <span className="sf-text text-sm">Schedule</span>
+              </a>
+            </div>
           </div>
         </div>
 
         {/* Glass Tile Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           
-      {/* Budget Tile */}
-          <div className="relative overflow-hidden rounded-3xl p-6 bg-gradient-to-br from-purple-600 via-purple-700 to-indigo-800 text-white shadow-2xl backdrop-blur-xl border border-white/10">
-            <div className="absolute inset-0 bg-white/5 backdrop-blur-3xl"></div>
+  {/* Budget Tile */}
+      <div className="relative overflow-hidden rounded-apple p-6 tile-soft">
             <div className="relative z-10">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold">Budget Range</h3>
-        <div className="w-10 h-10 bg-white/20 rounded-lg flex items-center justify-center"><Wallet className="w-5 h-5"/></div>
+              <div className="flex items-center justify-between mb-4 lh-card-tight">
+        <h3 className="sf-display h3 accent-green">Budget Range</h3>
+        <div className="w-10 h-10 rounded-lg grid place-items-center tint-primary"><Wallet className="w-5 h-5"/></div>
               </div>
               <div className="space-y-2">
-                <div className="text-2xl font-bold">{formatCurrency(budgetMin)}</div>
-                <div className="text-purple-200 text-sm">to</div>
-                <div className="text-2xl font-bold">{formatCurrency(budgetMax)}</div>
+                <div className="sf-display text-2xl font-semibold">{formatCurrency(budgetMin)}</div>
+        <div className="sf-text text-sm text-subtle">to</div>
+                <div className="sf-display text-2xl font-semibold">{formatCurrency(budgetMax)}</div>
               </div>
             </div>
           </div>
 
-      {/* Style Preference Tile */}
-          <div className="relative overflow-hidden rounded-3xl p-6 bg-gradient-to-br from-blue-600 via-blue-700 to-cyan-800 text-white shadow-2xl backdrop-blur-xl border border-white/10">
-            <div className="absolute inset-0 bg-white/5 backdrop-blur-3xl"></div>
+  {/* Style Preference Tile */}
+      <div className="relative overflow-hidden rounded-apple p-6 tile-soft">
             <div className="relative z-10">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold">Style Preference</h3>
-        <div className="w-10 h-10 bg-white/20 rounded-lg flex items-center justify-center"><House className="w-5 h-5"/></div>
+              <div className="flex items-center justify-between mb-4 lh-card-tight">
+        <h3 className="sf-display h3 accent-teal">Style Preference</h3>
+        <div className="w-10 h-10 rounded-lg grid place-items-center tint-primary"><House className="w-5 h-5"/></div>
               </div>
-              <div className="text-2xl font-bold capitalize">
+              <div className="sf-display text-2xl font-semibold capitalize">
                 {style || 'Not specified'}
               </div>
             </div>
           </div>
 
-      {/* Financing Tile */}
-          <div className="relative overflow-hidden rounded-3xl p-6 bg-gradient-to-br from-orange-600 via-orange-700 to-red-800 text-white shadow-2xl backdrop-blur-xl border border-white/10">
-            <div className="absolute inset-0 bg-white/5 backdrop-blur-3xl"></div>
+  {/* Financing Tile */}
+      <div className="relative overflow-hidden rounded-apple p-6 tile-soft">
             <div className="relative z-10">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold">Financing</h3>
-        <div className="w-10 h-10 bg-white/20 rounded-lg flex items-center justify-center"><Landmark className="w-5 h-5"/></div>
+              <div className="flex items-center justify-between mb-4 lh-card-tight">
+        <h3 className="sf-display h3 accent-amber">Financing</h3>
+        <div className="w-10 h-10 rounded-lg grid place-items-center tint-warn"><Landmark className="w-5 h-5"/></div>
               </div>
-              <div className="text-2xl font-bold capitalize">
+              <div className="sf-display text-2xl font-semibold capitalize">
                 {financing || 'Not specified'}
               </div>
             </div>
           </div>
 
-      {/* Communication Preference Tile */}
-          <div className="relative overflow-hidden rounded-3xl p-6 bg-gradient-to-br from-emerald-600 via-emerald-700 to-teal-800 text-white shadow-2xl backdrop-blur-xl border border-white/10">
-            <div className="absolute inset-0 bg-white/5 backdrop-blur-3xl"></div>
+  {/* Communication Preference Tile */}
+      <div className="relative overflow-hidden rounded-apple p-6 tile-soft">
             <div className="relative z-10">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold">Preferred Contact</h3>
-        <div className="w-10 h-10 bg-white/20 rounded-lg flex items-center justify-center"><Phone className="w-5 h-5"/></div>
+              <div className="flex items-center justify-between mb-4 lh-card-tight">
+        <h3 className="sf-display h3 accent-blue">Preferred Contact</h3>
+        <div className="w-10 h-10 rounded-lg grid place-items-center tint-accent"><Phone className="w-5 h-5"/></div>
               </div>
-              <div className="text-2xl font-bold capitalize">
+              <div className="sf-display text-2xl font-semibold capitalize">
                 {preferredComm || 'Not specified'}
               </div>
             </div>
           </div>
 
-      {/* Status Tile */}
-          <div className="relative overflow-hidden rounded-3xl p-6 bg-gradient-to-br from-pink-600 via-pink-700 to-rose-800 text-white shadow-2xl backdrop-blur-xl border border-white/10">
-            <div className="absolute inset-0 bg-white/5 backdrop-blur-3xl"></div>
+  {/* Status Tile */}
+      <div className="relative overflow-hidden rounded-apple p-6 tile-soft">
             <div className="relative z-10">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold">Current Status</h3>
-        <div className="w-10 h-10 bg-white/20 rounded-lg flex items-center justify-center"><BarChart2 className="w-5 h-5"/></div>
+              <div className="flex items-center justify-between mb-4 lh-card-tight">
+        <h3 className="sf-display h3">Current Status</h3>
+        <div className="w-10 h-10 rounded-lg grid place-items-center tint-danger"><BarChart2 className="w-5 h-5"/></div>
               </div>
-              <div className="text-2xl font-bold capitalize">
-                {status.replace('_', ' ')}
-              </div>
+      <div className={`sf-display text-2xl font-semibold capitalize ${/closed/i.test(status) ? 'status-closed' : 'status-open'}`}>{status.replace('_', ' ')}</div>
             </div>
           </div>
 
-      {/* Contact Info Tile */}
-          <div className="relative overflow-hidden rounded-3xl p-6 bg-gradient-to-br from-violet-600 via-violet-700 to-purple-800 text-white shadow-2xl backdrop-blur-xl border border-white/10">
-            <div className="absolute inset-0 bg-white/5 backdrop-blur-3xl"></div>
+  {/* Contact Info Tile */}
+    <div className="relative overflow-hidden rounded-apple p-6 tile-soft">
             <div className="relative z-10">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold">Contact Info</h3>
-        <div className="w-10 h-10 bg-white/20 rounded-lg flex items-center justify-center"><Mail className="w-5 h-5"/></div>
+        <div className="flex items-center justify-between mb-4 lh-card-tight">
+    <h3 className="sf-display h3 accent-purple">Contact Info</h3>
+  <div className="w-10 h-10 rounded-lg grid place-items-center tint-primary"><Mail className="w-5 h-5"/></div>
               </div>
               <div className="space-y-2">
-                <div className="text-lg font-medium">{client.email || 'No email'}</div>
-                <div className="text-lg font-medium">{client.phone || 'No phone'}</div>
+    <div className="sf-text text-[1.0625rem] font-medium">{client.email || 'No email'}</div>
+    <div className="sf-text text-[1.0625rem] font-medium">{client.phone || 'No phone'}</div>
               </div>
             </div>
           </div>
@@ -295,14 +320,13 @@ export default function ClientDetailPage() {
         {/* Notes Section */}
         {notes && (
           <div className="mt-8">
-            <div className="relative overflow-hidden rounded-3xl p-8 bg-gradient-to-br from-slate-700 via-slate-800 to-gray-900 text-white shadow-2xl backdrop-blur-xl border border-white/10">
-              <div className="absolute inset-0 bg-white/5 backdrop-blur-3xl"></div>
+            <div className="relative overflow-hidden rounded-apple p-8 panel-glass panel-elevated">
               <div className="relative z-10">
                 <div className="flex items-center mb-6">
-                  <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center mr-4"><NotebookPen className="w-5 h-5"/></div>
-                  <h3 className="text-2xl font-bold">Notes</h3>
+                  <div className="w-10 h-10 rounded-xl grid place-items-center tint-primary mr-4"><NotebookPen className="w-5 h-5"/></div>
+                  <h3 className="sf-display h2">Notes</h3>
                 </div>
-                <div className="text-lg leading-relaxed whitespace-pre-wrap">
+                <div className="sf-text text-[1.0625rem] lh-section-loose whitespace-pre-wrap">
                   {notes}
                 </div>
               </div>
@@ -310,92 +334,68 @@ export default function ClientDetailPage() {
           </div>
         )}
 
-        {/* Quick Actions */}
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mt-8">
-          <a
-            href={telHref || undefined}
-            aria-disabled={!telHref}
-            className={`p-4 bg-white/80 backdrop-blur-sm rounded-2xl border border-gray-200 shadow-sm transition-all duration-200 ${telHref ? 'hover:shadow-md hover:scale-105' : 'opacity-50 cursor-not-allowed'}`}
-          >
-            <PhoneCall className="w-6 h-6 mb-2"/>
-            <div className="text-sm font-medium text-gray-700">Call Client</div>
-            {!telHref && <div className="text-xs text-gray-500 mt-1">No phone on file</div>}
-          </a>
-          <a
-            href={mailtoHref || undefined}
-            aria-disabled={!mailtoHref}
-            className={`p-4 bg-white/80 backdrop-blur-sm rounded-2xl border border-gray-200 shadow-sm transition-all duration-200 ${mailtoHref ? 'hover:shadow-md hover:scale-105' : 'opacity-50 cursor-not-allowed'}`}
-          >
-            <Mail className="w-6 h-6 mb-2"/>
-            <div className="text-sm font-medium text-gray-700">Send Email</div>
-            {!mailtoHref && <div className="text-xs text-gray-500 mt-1">No email on file</div>}
-          </a>
-          <button className="p-4 bg-white/80 backdrop-blur-sm rounded-2xl border border-gray-200 shadow-sm hover:shadow-md transition-all duration-200 hover:scale-105">
-            <Calendar className="w-6 h-6 mb-2"/>
-            <div className="text-sm font-medium text-gray-700">Schedule</div>
-          </button>
-        </div>
+  {/* Quick Actions moved to header */}
 
   {/* AI Tools */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-8">
-          <div className="relative overflow-hidden rounded-3xl p-6 bg-gradient-to-br from-indigo-600 via-indigo-700 to-blue-800 text-white shadow-2xl backdrop-blur-xl border border-white/10">
-            <div className="absolute inset-0 bg-white/5 backdrop-blur-3xl"></div>
+          {/* Vibrant flat card: Follow-up */}
+          <div className="relative overflow-hidden p-6 ai-card ai-card-blue">
             <div className="relative z-10 space-y-4">
               <div className="flex items-center justify-between">
-                <h3 className="text-lg font-semibold">Generate follow-up</h3>
-                <div className="w-10 h-10 bg-white/20 rounded-lg flex items-center justify-center"><Mail className="w-5 h-5"/></div>
+                <h3 className="sf-display h3 heading-blue">Generate follow-up</h3>
+                <div className="ai-chip ai-chip-blue"><Mail className="w-5 h-5"/></div>
               </div>
               <button
                 onClick={handleGenerateFollowup}
                 disabled={followupLoading}
-                className={`px-4 py-2 rounded-lg text-indigo-900 bg-white/90 hover:bg-white font-medium transition ${followupLoading ? 'opacity-70 cursor-wait' : ''}`}
+                className={`px-4 py-2 rounded-lg text-white bg-primary hover:opacity-95 font-medium transition ${followupLoading ? 'opacity-70 cursor-wait' : ''}`}
               >
                 {followupLoading ? 'Generating…' : 'Draft email'}
               </button>
               {followupDraft && (
-                <div className="mt-2 p-3 bg-black/30 rounded-xl text-sm whitespace-pre-wrap">
+                <div className="mt-2 p-3 rounded-xl text-sm whitespace-pre-wrap content-box-light">
                   {followupDraft}
                 </div>
               )}
               <div className="flex items-center gap-3 text-sm">
-                <span className="opacity-80">Tone:</span>
+                <span className="opacity-90 text-pop">Tone:</span>
                 <select
                   value={tone}
                   onChange={e => setTone(e.target.value as any)}
-                  className="text-indigo-900 rounded-md px-2 py-1 bg-white/90"
+                  className="input-neon px-2 py-1"
                 >
                   <option>Professional</option>
                   <option>Casual</option>
                   <option>Friendlier</option>
                 </select>
-                <button onClick={handleGenerateFollowup} className="px-3 py-1 rounded-md bg-white/80 text-indigo-900 border border-white/40">Regenerate</button>
+                <button onClick={handleGenerateFollowup} className="px-3 py-1 rounded-md btn-neon">Regenerate</button>
               </div>
             </div>
           </div>
 
-          <div className="relative overflow-hidden rounded-3xl p-6 bg-gradient-to-br from-amber-600 via-amber-700 to-red-700 text-white shadow-2xl backdrop-blur-xl border border-white/10">
-            <div className="absolute inset-0 bg-white/5 backdrop-blur-3xl"></div>
+      {/* Vibrant flat card: Amend */}
+      <div className="relative overflow-hidden p-6 ai-card ai-card-amber">
             <div className="relative z-10 space-y-4">
               <button type="button" onClick={()=>setOpenAmend(v=>!v)} className="w-full text-left flex items-center justify-between">
-                <span className="inline-flex items-center gap-2"><div className="w-10 h-10 bg-white/20 rounded-lg flex items-center justify-center"><NotebookPen className="w-5 h-5"/></div><span className="text-lg font-semibold">Amend contracts</span></span>
+        <span className="inline-flex items-center gap-2"><div className="ai-chip ai-chip-amber"><NotebookPen className="w-5 h-5"/></div><span className="sf-display h3 heading-amber">Amend contracts</span></span>
                 <ChevronDown className={`w-5 h-5 transition-transform ${openAmend ? 'rotate-180' : ''}`} />
               </button>
               {openAmend && (
               <>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                <select value={stateCode} onChange={e => setStateCode(e.target.value)} className="text-amber-900 rounded-md px-2 py-2 bg-white/90">
+  <select value={stateCode} onChange={e => setStateCode(e.target.value)} className="input-neon px-2 py-2">
                   <option value="">State</option>
                   {US_STATES.map(s => (
                     <option key={s.code} value={s.code}>{s.name}</option>
                   ))}
                 </select>
-                <select value={countyFips} onChange={e => setCountyFips(e.target.value)} className="text-amber-900 rounded-md px-2 py-2 bg-white/90">
+  <select value={countyFips} onChange={e => setCountyFips(e.target.value)} className="input-neon px-2 py-2">
                   <option value="">Jurisdiction (County)</option>
                   {counties.map(c => (
                     <option key={c.fips} value={c.fips}>{c.name}</option>
                   ))}
                 </select>
-                <select value={selectedContractId} onChange={e => setSelectedContractId(e.target.value)} className="text-amber-900 rounded-md px-2 py-2 bg-white/90">
+  <select value={selectedContractId} onChange={e => setSelectedContractId(e.target.value)} className="input-neon px-2 py-2">
                   {contracts.map(c => (
                     <option key={c.id} value={c.id}>{c.name}</option>
                   ))}
@@ -405,17 +405,17 @@ export default function ClientDetailPage() {
                 value={changeText}
                 onChange={e => setChangeText(e.target.value)}
                 placeholder="Describe the changes in natural language (e.g., move closing to Sept 15, add 7-day inspection contingency)."
-                className="w-full min-h-[120px] text-amber-900 rounded-lg px-3 py-2 bg-white/90 placeholder-amber-800/70"
+  className="w-full min-h-[120px] input-neon px-3 py-2 placeholder-amber-200/70"
               />
               <button
                 onClick={handleAmendContracts}
                 disabled={amendLoading}
-                className={`px-4 py-2 rounded-lg text-amber-900 bg-white/90 hover:bg-white font-medium transition ${amendLoading ? 'opacity-70 cursor-wait' : ''}`}
+        className={`px-4 py-2 rounded-lg text-white bg-primary hover:opacity-95 font-medium transition ${amendLoading ? 'opacity-70 cursor-wait' : ''}`}
               >
                 {amendLoading ? 'Generating…' : 'Generate amendment summary'}
               </button>
               {amendDraft && (
-                <div className="mt-2 p-3 bg-black/30 rounded-xl text-sm whitespace-pre-wrap">
+        <div className="mt-2 p-3 rounded-xl text-sm whitespace-pre-wrap content-box-light">
                   {amendDraft}
                 </div>
               )}

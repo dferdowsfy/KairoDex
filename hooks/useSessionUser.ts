@@ -5,6 +5,7 @@ import { supabase } from '../lib/supabaseBrowser'
 export function useSessionUser() {
   const [user, setUser] = useState<import('@supabase/supabase-js').User | null>(null)
   const [loading, setLoading] = useState(true)
+  const [synced, setSynced] = useState(false)
   useEffect(() => {
     let mounted = true
     // In environments without Supabase configured, supabase may throw on access.
@@ -22,5 +23,20 @@ export function useSessionUser() {
       return () => { mounted = false }
     }
   }, [])
+
+  // Ensure a corresponding row exists in public.users for new accounts
+  useEffect(() => {
+    if (!user || synced) return
+    const email = (user as any)?.email as string | undefined
+    if (!email) return
+    ;(async () => {
+      try {
+        await (supabase as any)
+          .from('users')
+          .upsert({ email }, { onConflict: 'email' })
+      } catch {}
+      setSynced(true)
+    })()
+  }, [user, synced])
   return { user, loading }
 }

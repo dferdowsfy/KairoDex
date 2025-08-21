@@ -75,7 +75,7 @@ export default function WheelDateTime({ value, onChange, days = 60, minuteStep =
       <WheelColumn refEl={hourRef} values={hours.map(n => String(n))} index={hourIdx} setIndex={setHourIdx} />
       <WheelColumn refEl={minRef} values={minutes.map(n => String(n).padStart(2,'0'))} index={minuteIdx} setIndex={setMinuteIdx} />
       <WheelColumn refEl={apRef} values={[...ampm]} index={apIdx} setIndex={setApIdx} />
-      <div aria-hidden className="pointer-events-none absolute inset-x-0 top-1/2 -translate-y-1/2 h-10 border-y border-slate-200"></div>
+  <div aria-hidden className="pointer-events-none absolute inset-x-0 top-1/2 -translate-y-1/2 h-10 border-y border-white/40"></div>
     </div>
   )
 }
@@ -96,10 +96,10 @@ function WheelColumn({ values, index, setIndex, refEl }: { values: string[]; ind
     if (el) el.scrollTop = index * ITEM_H
   }, [index, refEl])
   return (
-    <div ref={refEl} onScroll={onScroll} className="relative h-40 overflow-y-auto snap-y snap-mandatory rounded-lg border border-slate-200 bg-white" style={{ scrollBehavior: 'smooth' }}>
+  <div ref={refEl} onScroll={onScroll} className="relative h-40 overflow-y-auto snap-y snap-mandatory rounded-lg border border-white/50 bg-white/90" style={{ scrollBehavior: 'smooth' }}>
       <div style={{ height: ITEM_H }} aria-hidden></div>
       {values.map((v, i) => (
-        <div key={i} className={`h-10 flex items-center justify-center snap-center ${i===index ? 'text-slate-900 font-medium' : 'text-slate-500'}`}>{v}</div>
+  <div key={i} className={`h-10 flex items-center justify-center snap-center ${i===index ? 'text-ink font-medium' : 'text-ink/60'}`}>{v}</div>
       ))}
       <div style={{ height: ITEM_H }} aria-hidden></div>
     </div>

@@ -120,9 +120,8 @@ function applyTheme(colors: ThemeColors, name: ThemeName) {
   root.style.setProperty('--ink', colors.ink)
   root.style.setProperty('--surface', colors.surface)
   root.style.setProperty('--card', colors.card)
-  // background can be a plain color or any valid CSS gradient
-  const bg = colors.pageBg || 'linear-gradient(180deg, #ffffff 0%, var(--surface) 100%)'
-  root.style.setProperty('--page-bg', bg)
+  // App background is fixed per product spec
+  root.style.setProperty('--page-bg', '#0F1A2B')
 }
 
 interface ThemeState {

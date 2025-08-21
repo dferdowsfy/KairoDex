@@ -1,60 +1,107 @@
 "use client"
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ChevronDown } from 'lucide-react'
 import { useClients } from '@/hooks/useClients'
-import type { Client } from '@/lib/types'
+import { useUI } from '@/store/ui'
+import { useSessionUser } from '@/hooks/useSessionUser'
+import { supabase } from '@/lib/supabaseBrowser'
+import Logo from '@/components/Logo'
 
 export function ClientsTopBar() {
   const pathname = usePathname()
-  const show = !pathname?.startsWith('/login')
+  const hideOn = ['/login', '/signup']
+  const show = !hideOn.some(prefix => pathname?.startsWith(prefix))
   const [open, setOpen] = useState(false)
   const { data: clients = [] } = useClients()
   const activeClientId = pathname?.match(/^\/clients\/(.+?)(?:\/|$)/)?.[1]
-  const activeClient = clients.find(c => c.id === activeClientId)
+  const { selectedClientId, setSelectedClientId } = useUI()
+  const { user } = useSessionUser()
+  const activeClient = clients.find(c => c.id === (activeClientId || selectedClientId))
+  const isActive = (href: string) => href === '/' ? pathname === '/' : (pathname?.startsWith(href) ?? false)
+
+  // Close the dropdown on route changes
+  useEffect(() => { setOpen(false) }, [pathname])
 
   if (!show) return null
   return (
-    <header className="sticky top-0 z-20">
-      <div className="w-full" style={{ background: 'linear-gradient(180deg,#0B1324,#0E1A33)' }}>
-        <div className="max-w-6xl mx-auto px-6 py-4 flex items-center gap-6 text-white">
-          <Link href="/" className="text-xl font-bold tracking-wide">AgentHub</Link>
+    <header className="sticky top-0 z-30">
+      <div className="w-full border-b border-white/10" style={{ background: 'linear-gradient(180deg,#0B1324,#0E1A33)' }}>
+        <div className="max-w-6xl mx-auto px-6 py-3 flex items-center gap-6 text-white">
+          <Logo className="h-8 w-auto" />
           {/* Evenly-spaced top menu with larger text */}
-          <nav className="flex-1 grid grid-flow-col auto-cols-fr gap-3 px-4">
+          <nav className="flex-1 grid grid-flow-col auto-cols-fr gap-2 px-4">
             {[
-              { href: '/clients', label: 'Clients' },
+              { href: '/', label: 'Dashboard' },
               { href: '/tasks', label: 'Tasks' },
-              { href: '/profile', label: 'Profile' }
+              { href: '/settings', label: 'Settings' }
             ].map(item => {
-              const active = pathname?.startsWith(item.href)
+              const active = isActive(item.href)
               return (
                 <Link
                   key={item.href}
                   href={item.href}
-                  className={`text-lg font-medium inline-flex items-center justify-center rounded-full px-6 py-3 border transition-all duration-300 ${active
-                    ? 'border-white text-white shadow-[0_0_20px_rgba(255,255,255,0.6)] shadow-white/60'
-                    : 'border-white/10 text-white/80 hover:text-white hover:border-white/30'} `}
-                  style={active ? { background: 'linear-gradient(180deg,#111214,#0A0B0E)' } : { background: 'linear-gradient(180deg,rgba(255,255,255,0.12),rgba(255,255,255,0.06))' }}
+                  className={`no-underline visited:text-white text-base font-semibold inline-flex items-center justify-center rounded-full px-5 py-2.5 border transition-all duration-300 ${active
+                    ? 'border-white/40 text-white bg-[linear-gradient(90deg,#2563EB,#EC4899)] shadow-[0_0_18px_rgba(37,99,235,.35)]'
+                    : 'border-white/10 text-white/90 hover:text-white hover:border-white/30 bg-white/10'} `}
                 >
                   {item.label}
                 </Link>
               )
             })}
           </nav>
+          {/* Clients switcher: always allow changing the selected client */}
           <div className="relative">
-            <button onClick={()=>setOpen(v=>!v)} className="inline-flex items-center gap-2 rounded-md border border-white/20 bg-white/10 px-4 py-2.5 text-lg font-medium text-white hover:bg-white/15">
+            <button
+              onClick={()=>setOpen(v=>!v)}
+              className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-4 py-2 text-sm font-semibold text-white hover:bg-white/15"
+              aria-haspopup="listbox"
+              aria-expanded={open}
+            >
               {activeClient ? activeClient.name : 'Clients'} <ChevronDown className="h-5 w-5"/>
             </button>
             {open && (
-              <div className="absolute right-0 mt-2 w-64 bg-[#0F172A] border border-white/15 rounded-md shadow-lg p-1 text-white/90">
-                {clients.map(c => (
-                  <Link key={c.id} href={`/clients/${c.id}`} className="block px-3 py-2 text-base rounded hover:bg-white/10">{c.name}</Link>
-                ))}
+              <div className="absolute right-0 mt-2 w-64 bg-[#0F172A] border border-white/15 rounded-md shadow-lg p-1 text-white/90 z-50">
+                {clients.length ? (
+                  <>
+                    {clients.map(c => (
+                      <button
+                        key={c.id}
+                        onClick={() => { setSelectedClientId(c.id); setOpen(false) }}
+                        className={`w-full text-left px-3 py-2 text-base rounded hover:bg-white/10 ${c.id === (activeClientId || selectedClientId) ? 'bg-white/10' : ''}`}
+                        role="option"
+                        aria-selected={c.id === (activeClientId || selectedClientId)}
+                      >
+                        {c.name}
+                      </button>
+                    ))}
+                    <div className="h-px bg-white/10 my-1"/>
+                    <button onClick={() => { setSelectedClientId(null); setOpen(false) }} className="w-full text-left px-3 py-2 text-sm rounded hover:bg-white/10 opacity-80">Clear selection</button>
+                  </>
+                ) : (
+                  <div className="px-3 py-2 text-sm opacity-80">No clients</div>
+                )}
               </div>
             )}
           </div>
-        </div>
+          {/* Auth actions */}
+      {user ? (
+            <button
+              onClick={async()=>{ try{ await supabase.auth.signOut() } catch{} }}
+        className="ml-3 inline-flex items-center rounded-full border border-white/20 bg-white/10 px-4 py-2 text-sm font-semibold text-white hover:bg-white/15"
+            >
+              Logout
+            </button>
+          ) : (
+            <Link
+              href="/login"
+        className="ml-3 inline-flex items-center rounded-full border border-white/20 bg-white/10 px-4 py-2 text-sm font-semibold text-white hover:bg-white/15 no-underline"
+            >
+              Login
+            </Link>
+          )}
+    </div>
       </div>
     </header>
   )
