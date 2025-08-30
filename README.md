@@ -1,4 +1,4 @@
-# NestAI (PWA)
+# kairodex (PWA)
 
 Mobile‑first AI‑native real estate CRM built with Next.js App Router, Tailwind, Supabase, TanStack Query, Zustand, and next‑pwa.
 
