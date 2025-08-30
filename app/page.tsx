@@ -1,170 +1,137 @@
 "use client"
 export const dynamic = 'force-dynamic'
-import React, { useState } from 'react'
-import { useRouter } from 'next/navigation'
+import React, { useEffect, useState } from 'react'
 import { useClients } from '@/hooks/useClients'
-import { Sparkles, Users, Clock, TrendingUp, Calendar, Phone, Mail, BarChart2, FileEdit } from 'lucide-react'
-import { useUI } from '@/store/ui'
 import { useClient } from '@/hooks/useClient'
+import { useUI } from '@/store/ui'
+import { Sparkles, SquarePen, CheckSquare, MessageCircle } from 'lucide-react'
+import ClientSelector from '@/components/ClientSelector'
+import ActionCard from '@/components/ActionCard'
+import ClientSummaryCard from '@/components/ClientSummaryCard'
+import FollowupComposer from '@/components/FollowupComposer'
+import AmendContractsPanel from '@/components/AmendContractsPanel'
+import RecentClientsList from '@/components/RecentClientsList'
+import { useSessionUser } from '@/hooks/useSessionUser'
+import QuickTaskForm from '@/components/QuickTaskForm'
+import ReminderCadence from '@/components/ReminderCadence'
+import AddClientModal from '@/components/AddClientModal'
+import Snapshot from '@/components/Snapshot'
+import NotesHistory from '@/components/NotesHistory'
 
 export default function HomePage() {
   const { data: clients = [] } = useClients()
-  const router = useRouter()
   const { selectedClientId, pushToast } = useUI()
   const { data: activeClient } = useClient((selectedClientId || '') as any)
-  
-  // Calculate stats from clients data
-  const activeClients = clients.filter(c => ['touring', 'offer', 'under_contract'].includes(c.stage)).length
-  const newLeads = clients.filter(c => c.stage === 'new').length
-  const closings = clients.filter(c => c.stage === 'under_contract').length
-  const totalClients = clients.length
-  const mailtoHref = (() => {
-    const email = (activeClient as any)?.email
-    if (!email) return ''
-    const subject = encodeURIComponent('Follow-up')
-    return `mailto:${email}?subject=${subject}`
+  const { user } = useSessionUser()
+  const [showTask, setShowTask] = useState(false)
+  const [showFollowup, setShowFollowup] = useState(false)
+  const [showAmend, setShowAmend] = useState(false)
+  const [showReminder, setShowReminder] = useState(false)
+  const [showAdd, setShowAdd] = useState(false)
+  const { setChatOpen } = useUI()
+
+  const agentName = (() => {
+    const meta = (user as any)?.user_metadata || {}
+    const first = (meta?.first_name || '').toString().trim()
+    if (first) return first
+    const email = (user as any)?.email as string | undefined
+    if (!email) return 'Agent'
+    // Use first token from email (before separators)
+    const raw = email.split('@')[0]
+    const token = raw.split(/[._-]+/)[0]
+    return token.charAt(0).toUpperCase() + token.slice(1)
   })()
 
+  // Do not auto-open chat; keep Home visible on initial load
+  // If needed, users can open chat via the Action Card or the Chat section button
+
+  async function onAction(type: 'followup'|'amend'|'task'|'reminder') {
+    if (!selectedClientId && (type !== 'task')) {
+      pushToast({ type: 'info', message: 'Pick a client first.' })
+      return
+    }
+  if (type === 'followup') { setShowFollowup(true); setShowAmend(false); setShowTask(false) }
+  else if (type === 'amend') { setShowAmend(true); setShowFollowup(false); setShowTask(false) }
+    else if (type === 'task') setShowTask(true)
+    else if (type === 'reminder') setShowReminder(true)
+  }
+
   return (
-    <main className="min-h-screen" style={{ background: 'var(--page-bg)' }}>
-  <div className="max-w-7xl mx-auto p-6 space-y-6">
-        
-        {/* Welcome Header */}
-        <div className="text-center mb-8 lh-section-loose">
-          <h1 className="sf-display h1 text-white mb-1">Dashboard Overview</h1>
-          <p className="sf-text text-[1.0625rem] text-ink/70">Your real estate business at a glance</p>
-        </div>
+  <main className="min-h-screen" style={{ background: 'linear-gradient(180deg,#F7F3EE,#F3EEE7 60%, #EFE8DF)' }}>
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-5 space-y-5 has-bottom-nav">
+  {/* Sticky header spacer (no interactions) */}
+  <div className="sticky top-[56px] md:top-[70px] z-10 bg-transparent pointer-events-none"></div>
 
-        {/* Stats Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          
-          {/* Active Clients */}
-          <div className="relative overflow-hidden rounded-apple p-6 tile tile-active">
-            <div className="relative z-10">
-              <div className="flex items-center justify-between mb-4 lh-card-tight">
-                <h3 className="sf-display h3 text-white">Active Clients</h3>
-                <div className="w-10 h-10 rounded-lg grid place-items-center icon-chip-dark">
-                  <Users className="w-6 h-6 icon-accent-active" />
-                </div>
-              </div>
-                <div className="sf-display text-3xl font-semibold mb-1 text-white">{activeClients}</div>
-                <div className="sf-text text-sm text-gray-200">Currently touring, offering, or under contract</div>
+        {/* Greeting + selector */}
+        <section className="space-y-3">
+          <h1 className="text-[45pt] sm:text-[35pt] leading-tight font-semibold text-slate-900">Hi, {agentName} 👋</h1>
+          <div className="text-slate-600">Manage your clients and tasks</div>
+          <ClientSelector onAddClient={()=>setShowAdd(true)} />
+        </section>
+
+  {/* Snapshot at top */}
+        <section>
+          <Snapshot />
+        </section>
+
+        {/* Notes history for selected client */}
+        <section>
+          <NotesHistory clientId={selectedClientId || undefined} />
+        </section>
+
+        {/* Action Center */}
+        <section id="actions" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <ActionCard className="tile tile-followup" title="Generate Follow-Up" description={activeClient?`For ${activeClient?.name}`:undefined} icon={<Sparkles className="h-6 w-6"/>} iconClassName="tint-amber" onClick={()=>onAction('followup')} />
+          <ActionCard className="tile tile-amend" title="Amend Contracts" description="Draft concise amendment" icon={<SquarePen className="h-6 w-6"/>} iconClassName="tint-green" onClick={()=>onAction('amend')} />
+          <ActionCard className="tile tile-create" title="Create Task" description="Quick todo for today" icon={<CheckSquare className="h-6 w-6"/>} iconClassName="tint-purple" onClick={()=>onAction('task')} />
+          <ActionCard className="tile tile-reminder" title="Chat" description="Ask or draft anything" icon={<MessageCircle className="h-6 w-6"/>} iconClassName="tint-blue" onClick={()=>{ (useUI.getState() as any)?.setChatOpen?.(true) }} />
+        </section>
+
+  {/* Client summary */}
+        <section>
+          <ClientSummaryCard />
+        </section>
+
+  {/* Old NoteTiles removed; Snapshot is now the primary top section */}
+
+        {/* Inline panels when invoked */}
+        {showFollowup && (
+          <section>
+            <FollowupComposer />
+          </section>
+        )}
+        {showAmend && (
+          <section>
+            <AmendContractsPanel />
+          </section>
+        )}
+        {showTask && (
+          <section>
+            <QuickTaskForm clientId={selectedClientId || undefined} onCreated={()=>setShowTask(false)} onCancel={()=>setShowTask(false)} />
+          </section>
+        )}
+        {showReminder && (
+          <section>
+            <ReminderCadence clientId={selectedClientId || undefined} onDone={()=>setShowReminder(false)} onCancel={()=>setShowReminder(false)} />
+          </section>
+        )}
+
+  {/* Recent clients removed to simplify UI per spec */}
+
+        {/* Prominent chat entry (desktop will also have panel) */}
+        <section className="rounded-2xl border border-slate-200 bg-white p-5">
+          <div className="flex items-center gap-3">
+            <div className="shrink-0 w-11 h-11 rounded-xl grid place-items-center bg-sky-50 border border-sky-100 text-sky-600"><MessageCircle className="h-6 w-6"/></div>
+            <div className="min-w-0">
+              <div className="font-semibold text-slate-900">Chat</div>
+              <div className="text-sm text-slate-600">Open the assistant to draft follow-ups, summarize, and plan next steps.</div>
             </div>
+            <a href="#" onClick={(e)=>{ e.preventDefault(); (useUI.getState() as any)?.setChatOpen?.(true) }} className="ml-auto inline-flex items-center rounded-xl bg-slate-900 text-white px-4 py-2">Open</a>
           </div>
-
-          {/* New Leads */}
-          <div className="relative overflow-hidden rounded-apple p-6 tile tile-leads">
-            <div className="relative z-10">
-              <div className="flex items-center justify-between mb-4 lh-card-tight">
-                <h3 className="sf-display h3 text-white">New Leads</h3>
-                <div className="w-10 h-10 rounded-lg grid place-items-center icon-chip-dark">
-                  <Sparkles className="w-6 h-6 icon-accent-leads" />
-                </div>
-              </div>
-                <div className="sf-display text-3xl font-semibold mb-1 text-white">{newLeads}</div>
-                <div className="sf-text text-sm text-gray-200">Fresh prospects to nurture</div>
-            </div>
-          </div>
-
-          {/* Pending Closings */}
-          <div className="relative overflow-hidden rounded-apple p-6 tile tile-closings">
-            <div className="relative z-10">
-              <div className="flex items-center justify-between mb-4 lh-card-tight">
-                <h3 className="sf-display h3 text-[#111827]">Pending Closings</h3>
-                <div className="w-10 h-10 rounded-lg grid place-items-center icon-chip-yellow">
-                  <Clock className="w-6 h-6 icon-accent-closings" />
-                </div>
-              </div>
-                <div className="sf-display text-3xl font-semibold mb-1 text-[#111827]">{closings}</div>
-                <div className="sf-text text-sm text-slate-700">Under contract</div>
-            </div>
-          </div>
-
-          {/* Total Portfolio */}
-          <div className="relative overflow-hidden rounded-apple p-6 tile tile-total">
-            <div className="relative z-10">
-              <div className="flex items-center justify-between mb-4 lh-card-tight">
-                <h3 className="sf-display h3 text-white">Total Clients</h3>
-                <div className="w-10 h-10 rounded-lg grid place-items-center icon-chip-dark">
-                  <TrendingUp className="w-6 h-6 icon-accent-total" />
-                </div>
-              </div>
-                <div className="sf-display text-3xl font-semibold mb-1 text-white">{totalClients}</div>
-                <div className="sf-text text-sm text-gray-200">All clients in your portfolio</div>
-            </div>
-          </div>
-        </div>
-
-        {/* Recent Clients */}
-  <div className="relative overflow-hidden rounded-apple p-8 panel-glass">
-          <div className="relative z-10">
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="sf-display h2 text-ink">Recent Clients</h2>
-              <a href="/clients" className="text-primary hover:opacity-90 font-medium">View all</a>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {clients.slice(0, 6).map((client) => (
-                <a
-                  key={client.id}
-                  href={`/clients/${client.id}`}
-                  onClick={() => useUI.getState().setSelectedClientId(client.id)}
-                  className="block p-4 panel-glass rounded-2xl hover:shadow-lg transition-all duration-200 hover:scale-105"
-                >
-                  <div className="flex items-center space-x-3">
-                    <div className="w-10 h-10 rounded-full grid place-items-center bg-primary text-white font-semibold">
-                {(client.name ?? client.email ?? "?").charAt(0)}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="sf-text text-[0.95rem] font-medium text-white truncate">{client.name}</p>
-                        <p className="sf-text text-xs text-gray-300 capitalize">{client.stage.replace('_', ' ')}</p>
-                    </div>
-                  </div>
-                </a>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* Quick Actions */}
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
-          <button className="p-6 panel-glass rounded-apple shadow-sm hover:shadow-lg transition-all duration-200 hover:scale-105 group" onClick={() => router.push('/tasks?quick=calls')}>
-            <div className="mb-3 group-hover:scale-110 transition-transform"><Phone className="w-7 h-7"/></div>
-            <div className="text-sm font-medium text-white">Schedule Calls</div>
-          </button>
-          <a
-            href={mailtoHref || undefined}
-            aria-disabled={!mailtoHref}
-            onClick={(e) => { if (!mailtoHref) { e.preventDefault(); pushToast({ type: 'info', message: 'Pick a client with an email from the top bar first.' }) } }}
-            className={`p-6 panel-glass rounded-apple shadow-sm transition-all duration-200 group ${mailtoHref ? 'hover:shadow-lg hover:scale-105' : 'opacity-60 cursor-not-allowed'}`}
-          >
-            <div className="mb-3 group-hover:scale-110 transition-transform"><Mail className="w-7 h-7"/></div>
-            <div className="text-sm font-medium text-white">Send Emails</div>
-          </a>
-          <button className="p-6 panel-glass rounded-apple shadow-sm hover:shadow-lg transition-all duration-200 hover:scale-105 group" onClick={() => router.push('/tasks?view=calendar')}>
-            <div className="mb-3 group-hover:scale-110 transition-transform"><Calendar className="w-7 h-7"/></div>
-            <div className="text-sm font-medium text-white">View Calendar</div>
-          </button>
-          <button className="p-6 panel-glass rounded-apple shadow-sm hover:shadow-lg transition-all duration-200 hover:scale-105 group" onClick={() => router.push('/clients?view=reports')}>
-            <div className="mb-3 group-hover:scale-110 transition-transform"><BarChart2 className="w-7 h-7"/></div>
-            <div className="text-sm font-medium text-white">View Reports</div>
-          </button>
-          <button className="p-6 panel-glass rounded-apple shadow-sm hover:shadow-lg transition-all duration-200 hover:scale-105 group" onClick={() => router.push('/followup')}>
-            <div className="mb-3 group-hover:scale-110 transition-transform"><Sparkles className="w-7 h-7"/></div>
-            <div className="text-sm font-medium text-white">Generate Follow‑Up</div>
-          </button>
-          <button className="p-6 panel-glass rounded-apple shadow-sm hover:shadow-lg transition-all duration-200 hover:scale-105 group" onClick={() => {
-            if (selectedClientId) {
-              window.location.href = `/clients/${selectedClientId}#amend`
-            } else {
-              pushToast({ type: 'info', message: 'Pick a client from the top bar to amend a contract.' })
-            }
-          }}>
-            <div className="mb-3 group-hover:scale-110 transition-transform"><FileEdit className="w-7 h-7"/></div>
-            <div className="text-sm font-medium text-white">Amend Contracts</div>
-          </button>
-        </div>
+        </section>
+  <AddClientModal open={showAdd} onClose={()=>setShowAdd(false)} onCreated={()=>{ /* list will auto-refetch by hooks when selectedClientId set */ }} />
       </div>
     </main>
   )
 }
- 
+

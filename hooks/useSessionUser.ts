@@ -24,19 +24,10 @@ export function useSessionUser() {
     }
   }, [])
 
-  // Ensure a corresponding row exists in public.users for new accounts
+  // Remove auto-sync to public.users to avoid 400 errors in environments without that table
   useEffect(() => {
     if (!user || synced) return
-    const email = (user as any)?.email as string | undefined
-    if (!email) return
-    ;(async () => {
-      try {
-        await (supabase as any)
-          .from('users')
-          .upsert({ email }, { onConflict: 'email' })
-      } catch {}
-      setSynced(true)
-    })()
+    setSynced(true)
   }, [user, synced])
   return { user, loading }
 }

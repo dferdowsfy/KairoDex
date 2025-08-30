@@ -1,7 +1,7 @@
 "use client"
 import { usePathname } from 'next/navigation'
-import ChatHandle from './ChatHandle'
 import ChatPanel from './ChatPanel'
+import ChatHandle from './ChatHandle'
 
 export default function ChatMount() {
   const pathname = usePathname()
@@ -10,8 +10,8 @@ export default function ChatMount() {
   if (shouldHide) return null
   return (
     <>
-      <ChatHandle />
-      <ChatPanel />
+  <ChatHandle />
+  <ChatPanel />
     </>
   )
 }

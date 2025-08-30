@@ -25,7 +25,9 @@ const withPWA = nextPWA({
   skipWaiting: true,
   cacheOnFrontEndNav: true,
   disable: process.env.NODE_ENV === 'development',
-  runtimeCaching: [...runtimeCaching, ...extraCaching]
+  runtimeCaching: [...runtimeCaching, ...extraCaching],
+  // In App Router-only projects, avoid injecting legacy pages assets like /_error
+  buildExcludes: [/^.*$/], // let Next handle assets; keep our own runtimeCaching
 });
 
 /** @type {import('next').NextConfig} */

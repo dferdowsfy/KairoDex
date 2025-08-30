@@ -1,8 +1,7 @@
 "use client"
-import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useEffect, useState } from 'react'
-import { ChevronDown } from 'lucide-react'
+import { ChevronDown, Menu } from 'lucide-react'
 import { useClients } from '@/hooks/useClients'
 import { useUI } from '@/store/ui'
 import { useSessionUser } from '@/hooks/useSessionUser'
@@ -23,86 +22,77 @@ export function ClientsTopBar() {
 
   // Close the dropdown on route changes
   useEffect(() => { setOpen(false) }, [pathname])
+  // no mobile drawer in simplified header
 
   if (!show) return null
   return (
     <header className="sticky top-0 z-30">
-      <div className="w-full border-b border-white/10" style={{ background: 'linear-gradient(180deg,#0B1324,#0E1A33)' }}>
-        <div className="max-w-6xl mx-auto px-6 py-3 flex items-center gap-6 text-white">
+      <div className="w-full border-b border-default" style={{ background: 'var(--surface-2)' }}>
+        <div className="max-w-6xl mx-auto px-6 py-3 flex items-center gap-3 sm:gap-6 text-ink">
           <Logo className="h-8 w-auto" />
-          {/* Evenly-spaced top menu with larger text */}
-          <nav className="flex-1 grid grid-flow-col auto-cols-fr gap-2 px-4">
-            {[
-              { href: '/', label: 'Dashboard' },
-              { href: '/tasks', label: 'Tasks' },
-              { href: '/settings', label: 'Settings' }
-            ].map(item => {
-              const active = isActive(item.href)
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={`no-underline visited:text-white text-base font-semibold inline-flex items-center justify-center rounded-full px-5 py-2.5 border transition-all duration-300 ${active
-                    ? 'border-white/40 text-white bg-[linear-gradient(90deg,#2563EB,#EC4899)] shadow-[0_0_18px_rgba(37,99,235,.35)]'
-                    : 'border-white/10 text-white/90 hover:text-white hover:border-white/30 bg-white/10'} `}
-                >
-                  {item.label}
-                </Link>
-              )
-            })}
-          </nav>
-          {/* Clients switcher: always allow changing the selected client */}
-          <div className="relative">
+          {/* Simplified header: only client switcher on the right */}
+          <div className="relative ml-auto">
             <button
               onClick={()=>setOpen(v=>!v)}
-              className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-4 py-2 text-sm font-semibold text-white hover:bg-white/15"
+              className="inline-flex items-center gap-2 rounded-full border border-default bg-surface px-4 py-2 text-sm font-semibold text-ink hover:bg-surface-2"
               aria-haspopup="listbox"
               aria-expanded={open}
             >
               {activeClient ? activeClient.name : 'Clients'} <ChevronDown className="h-5 w-5"/>
             </button>
             {open && (
-              <div className="absolute right-0 mt-2 w-64 bg-[#0F172A] border border-white/15 rounded-md shadow-lg p-1 text-white/90 z-50">
+              <div className="absolute right-0 mt-2 w-64 bg-surface border border-default rounded-md shadow-lg p-1 text-ink z-50">
                 {clients.length ? (
                   <>
                     {clients.map(c => (
                       <button
                         key={c.id}
                         onClick={() => { setSelectedClientId(c.id); setOpen(false) }}
-                        className={`w-full text-left px-3 py-2 text-base rounded hover:bg-white/10 ${c.id === (activeClientId || selectedClientId) ? 'bg-white/10' : ''}`}
+                        className={`w-full text-left px-3 py-2 text-base rounded hover:bg-surface-2 ${c.id === (activeClientId || selectedClientId) ? 'bg-surface-2' : ''}`}
                         role="option"
                         aria-selected={c.id === (activeClientId || selectedClientId)}
                       >
                         {c.name}
                       </button>
                     ))}
-                    <div className="h-px bg-white/10 my-1"/>
-                    <button onClick={() => { setSelectedClientId(null); setOpen(false) }} className="w-full text-left px-3 py-2 text-sm rounded hover:bg-white/10 opacity-80">Clear selection</button>
+                    <div className="h-px bg-slate-200 my-1"/>
+                    <button onClick={() => { setSelectedClientId(null); setOpen(false) }} className="w-full text-left px-3 py-2 text-sm rounded hover:bg-surface-2 text-muted">Clear selection</button>
                   </>
                 ) : (
-                  <div className="px-3 py-2 text-sm opacity-80">No clients</div>
+                  <div className="px-3 py-2 text-sm text-muted">No clients</div>
                 )}
               </div>
             )}
           </div>
-          {/* Auth actions */}
-      {user ? (
+          {/* Right controls: hamburger -> menu (Settings), and auth */}
+          <div className="ml-2 relative">
+            <details>
+              <summary className="list-none inline-flex items-center justify-center rounded-full border border-default bg-white h-9 w-9 text-ink hover:bg-surface-2 cursor-pointer" aria-label="Open menu">
+                <Menu className="h-5 w-5" />
+              </summary>
+              <div className="absolute right-0 mt-2 w-40 bg-surface border border-default rounded-md shadow-lg p-1 text-ink z-50">
+                <a href="/settings" className="block px-3 py-2 rounded hover:bg-surface-2 no-underline text-ink">Settings</a>
+              </div>
+            </details>
+          </div>
+          {user ? (
             <button
-              onClick={async()=>{ try{ await supabase.auth.signOut() } catch{} }}
-        className="ml-3 inline-flex items-center rounded-full border border-white/20 bg-white/10 px-4 py-2 text-sm font-semibold text-white hover:bg-white/15"
+              onClick={async()=>{ try{ await supabase.auth.signOut(); window.location.href = '/kairodex.html' } catch{ window.location.href = '/kairodex.html' } }}
+              className="ml-2 inline-flex items-center rounded-full border border-default bg-white px-4 py-2 text-sm font-semibold text-ink hover:bg-surface-2"
             >
               Logout
             </button>
           ) : (
-            <Link
+            <a
               href="/login"
-        className="ml-3 inline-flex items-center rounded-full border border-white/20 bg-white/10 px-4 py-2 text-sm font-semibold text-white hover:bg-white/15 no-underline"
+              className="ml-2 inline-flex items-center rounded-full border border-default bg-white px-4 py-2 text-sm font-semibold text-ink hover:bg-surface-2 no-underline"
             >
               Login
-            </Link>
+            </a>
           )}
     </div>
       </div>
+      {/* No mobile drawer in simplified header */}
     </header>
   )
 }

@@ -132,7 +132,19 @@ interface ThemeState {
   reset: () => void
 }
 
-const persisted = typeof window !== 'undefined' ? window.localStorage.getItem('agenthub-theme-v1') : null
+// Backward-compatible key migration: agenthub-theme-v1 -> kairodex-theme-v1
+let persisted: string | null = null
+if (typeof window !== 'undefined') {
+  const legacy = window.localStorage.getItem('agenthub-theme-v1')
+  const current = window.localStorage.getItem('kairodex-theme-v1')
+  // Prefer current; if only legacy exists, migrate it
+  if (!current && legacy) {
+    try { window.localStorage.setItem('kairodex-theme-v1', legacy); window.localStorage.removeItem('agenthub-theme-v1') } catch {}
+    persisted = legacy
+  } else {
+    persisted = current
+  }
+}
 const initialName: ThemeName = (persisted && JSON.parse(persisted).name) || 'default'
 const initialColors: ThemeColors = (persisted && JSON.parse(persisted).colors) || PRESETS[initialName]
 
@@ -143,7 +155,7 @@ export const useTheme = create<ThemeState>((set, get) => ({
     const colors = PRESETS[name]
     applyTheme(colors, name)
     if (typeof window !== 'undefined') {
-      window.localStorage.setItem('agenthub-theme-v1', JSON.stringify({ name, colors }))
+  window.localStorage.setItem('kairodex-theme-v1', JSON.stringify({ name, colors }))
     }
     set({ name, colors })
   },
@@ -151,7 +163,7 @@ export const useTheme = create<ThemeState>((set, get) => ({
     const colors = { ...get().colors, ...partial }
     applyTheme(colors, get().name)
     if (typeof window !== 'undefined') {
-      window.localStorage.setItem('agenthub-theme-v1', JSON.stringify({ name: get().name, colors }))
+  window.localStorage.setItem('kairodex-theme-v1', JSON.stringify({ name: get().name, colors }))
     }
     set({ colors })
   },
@@ -160,7 +172,7 @@ export const useTheme = create<ThemeState>((set, get) => ({
     const colors = PRESETS[name]
     applyTheme(colors, name)
     if (typeof window !== 'undefined') {
-      window.localStorage.setItem('agenthub-theme-v1', JSON.stringify({ name, colors }))
+  window.localStorage.setItem('kairodex-theme-v1', JSON.stringify({ name, colors }))
     }
     set({ name, colors })
   }

@@ -1,7 +1,7 @@
 export interface AIOptions { model?: string; temperature?: number }
 
 export async function aiComplete(system: string, user: string, opts: AIOptions = {}) {
-  const temperature = opts.temperature ?? Number(process.env.AI_TEMPERATURE ?? '0.3')
+  const temperature = opts.temperature ?? Number(process.env.AI_TEMPERATURE ?? '0.35')
 
   // 1) OpenAI
   const openaiKey = process.env.OPENAI_API_KEY

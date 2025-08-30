@@ -19,6 +19,8 @@ export default function SettingsPage() {
 
   // Profile
   const [displayName, setDisplayName] = useState<string>('')
+  const [firstName, setFirstName] = useState<string>('')
+  const [lastName, setLastName] = useState<string>('')
   const [profileMsg, setProfileMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
 
   // Notifications (stored locally for now)
@@ -28,47 +30,40 @@ export default function SettingsPage() {
   const [notifMsg, setNotifMsg] = useState<string>('')
 
   // Appearance (stored locally; applied via CSS variables)
-  const [reduceMotion, setReduceMotion] = useState<boolean>(false)
-  const [compactMode, setCompactMode] = useState<boolean>(false)
   const [chatBotColor, setChatBotColor] = useState<string>('')
   const [chatBgPreset, setChatBgPreset] = useState<'default' | 'midnight' | 'slate'>('default')
   const [appearanceMsg, setAppearanceMsg] = useState<string>('')
 
   useEffect(() => {
-    const dn = (user as any)?.user_metadata?.display_name || (user as any)?.user_metadata?.name || ''
+  const meta = (user as any)?.user_metadata || {}
+  const dn = meta?.display_name || meta?.name || ''
     setDisplayName(dn)
+  setFirstName(meta?.first_name || '')
+  setLastName(meta?.last_name || '')
     if (typeof window !== 'undefined') {
       try {
-        const rawN = window.localStorage.getItem('agenthub-settings.notifications')
+  // Backward-compatible migration: agenthub-settings.* -> kairodex-settings.*
+  const rawN = window.localStorage.getItem('kairodex-settings.notifications') || window.localStorage.getItem('agenthub-settings.notifications')
         if (rawN) {
           const n = JSON.parse(rawN)
           setNotifEmail(!!n.email)
           setNotifSms(!!n.sms)
           setNotifTaskReminders(!!n.taskReminders)
         }
-        const rawA = window.localStorage.getItem('agenthub-settings.appearance')
+  const rawA = window.localStorage.getItem('kairodex-settings.appearance') || window.localStorage.getItem('agenthub-settings.appearance')
         if (rawA) {
           const a = JSON.parse(rawA)
-          setReduceMotion(!!a.reduceMotion)
-          setCompactMode(!!a.compactMode)
           if (a.chatBotColor) setChatBotColor(a.chatBotColor)
           if (a.chatBgPreset) setChatBgPreset(a.chatBgPreset)
-          applyAppearance({
-            reduceMotion: !!a.reduceMotion,
-            compactMode: !!a.compactMode,
-            chatBotColor: a.chatBotColor,
-            chatBgPreset: a.chatBgPreset || 'default'
-          })
+          applyAppearance({ chatBotColor: a.chatBotColor, chatBgPreset: a.chatBgPreset || 'default' })
         }
       } catch {}
     }
   }, [user])
 
-  function applyAppearance(opts: { reduceMotion?: boolean; compactMode?: boolean; chatBotColor?: string; chatBgPreset?: 'default'|'midnight'|'slate' }) {
+  function applyAppearance(opts: { chatBotColor?: string; chatBgPreset?: 'default'|'midnight'|'slate' }) {
     if (typeof document === 'undefined') return
     const root = document.documentElement
-    root.dataset.reduceMotion = opts.reduceMotion ? '1' : ''
-    root.dataset.density = opts.compactMode ? 'compact' : ''
     if (opts.chatBotColor) root.style.setProperty('--chat-bot-bg', opts.chatBotColor)
     const bg = (() => {
       const p = opts.chatBgPreset || 'default'
@@ -84,7 +79,8 @@ export default function SettingsPage() {
     setProfileMsg(null)
     if (!user) { setProfileMsg({ type: 'error', text: 'You must be logged in.' }); return }
     try {
-      const { error } = await (supabase as any).auth.updateUser({ data: { display_name: displayName } })
+      const fullName = (firstName || lastName) ? `${firstName} ${lastName}`.trim() : displayName
+      const { error } = await (supabase as any).auth.updateUser({ data: { display_name: fullName, first_name: firstName, last_name: lastName } })
       if (error) throw error
       setProfileMsg({ type: 'success', text: 'Profile updated.' })
     } catch (err: any) {
@@ -96,7 +92,8 @@ export default function SettingsPage() {
     e.preventDefault()
     try {
       const data = { email: notifEmail, sms: notifSms, taskReminders: notifTaskReminders }
-      window.localStorage.setItem('agenthub-settings.notifications', JSON.stringify(data))
+  try { window.localStorage.removeItem('agenthub-settings.notifications') } catch {}
+  window.localStorage.setItem('kairodex-settings.notifications', JSON.stringify(data))
       setNotifMsg('Saved. Stored on this device.')
       setTimeout(()=>setNotifMsg(''), 1500)
     } catch {
@@ -107,8 +104,9 @@ export default function SettingsPage() {
   function saveAppearance(e: React.FormEvent) {
     e.preventDefault()
     try {
-      const data = { reduceMotion, compactMode, chatBotColor, chatBgPreset }
-      window.localStorage.setItem('agenthub-settings.appearance', JSON.stringify(data))
+      const data = { chatBotColor, chatBgPreset }
+  try { window.localStorage.removeItem('agenthub-settings.appearance') } catch {}
+  window.localStorage.setItem('kairodex-settings.appearance', JSON.stringify(data))
       applyAppearance(data)
       setAppearanceMsg('Saved. Applied immediately.')
       setTimeout(()=>setAppearanceMsg(''), 1500)
@@ -165,25 +163,24 @@ export default function SettingsPage() {
     }
   }
 
-  const [tab, setTab] = useState<'profile'|'password'|'notifications'|'appearance'|'security'>('profile')
+  const [tab, setTab] = useState<'profile'|'password'|'notifications'|'appearance'>('profile')
   const tabList = [
     { key: 'profile', label: 'Profile' },
     { key: 'password', label: 'Password' },
     { key: 'notifications', label: 'Notifications' },
-    { key: 'appearance', label: 'Appearance' },
-    { key: 'security', label: 'Security' }
+    { key: 'appearance', label: 'Appearance' }
   ]
   return (
-    <main className="min-h-screen p-0" style={{ background: 'var(--page-bg)' }}>
-      <h1 className="sf-display h2 px-4 pt-4 pb-2 text-white">Settings</h1>
+    <main className="min-h-screen p-0 bg-page text-ink">
+      <h1 className="px-6 pt-5 pb-2 text-2xl font-semibold">Settings</h1>
       {/* Mobile-optimized tab bar */}
-      <nav className="sticky top-0 z-20 bg-gradient-to-b from-black/60 to-transparent px-2 pt-1 pb-2">
+      <nav className="sticky top-0 z-20 bg-surface px-2 pt-1 pb-2 border-b border-default">
         <ul className="flex overflow-x-auto no-scrollbar gap-2 sm:gap-4 md:gap-6 lg:gap-8 max-w-full">
           {tabList.map(t => (
             <li key={t.key} className="flex-1 min-w-[80px]">
               <button
-                className={`w-full px-3 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all
-                  ${tab === t.key ? 'bg-cyan-500/80 text-white shadow' : 'bg-white/10 text-gray-300'}
+                className={`w-full px-3 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all border
+                  ${tab === t.key ? 'bg-accentSoft text-accent border-accent' : 'bg-surface text-ink border-default'}
                 `}
                 onClick={() => setTab(t.key as any)}
                 aria-current={tab === t.key ? 'page' : undefined}
@@ -194,21 +191,29 @@ export default function SettingsPage() {
           ))}
         </ul>
       </nav>
-      <div className="p-2 sm:p-4 max-w-xl mx-auto">
+      <div className="p-4 sm:p-6 max-w-xl mx-auto">
         {tab === 'profile' && (
           <section className="mb-6">
-            <h2 className="text-sm font-medium text-gray-200 mb-2">Profile</h2>
-            <div className="panel-glass rounded-apple border border-white/10 p-3">
+            <h2 className="text-sm font-medium text-muted mb-2">Profile</h2>
+            <div className="rounded-apple border border-default bg-surface p-3">
               {!user ? (
                 <p className="text-sm text-ink/60">Sign in to manage your profile.</p>
               ) : (
                 <form onSubmit={saveProfile} className="space-y-3">
                   <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3">
-                    <label className="w-full sm:w-40 text-sm text-gray-300">Display name</label>
+                    <label className="w-full sm:w-40 text-sm text-muted">First name</label>
+                    <input type="text" className="flex-1 h-10 input-neon px-3 text-sm" value={firstName} onChange={(e)=>setFirstName(e.target.value)} placeholder="First name" />
+                  </div>
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3">
+                    <label className="w-full sm:w-40 text-sm text-muted">Last name</label>
+                    <input type="text" className="flex-1 h-10 input-neon px-3 text-sm" value={lastName} onChange={(e)=>setLastName(e.target.value)} placeholder="Last name" />
+                  </div>
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3">
+                    <label className="w-full sm:w-40 text-sm text-muted">Display name</label>
                     <input type="text" className="flex-1 h-10 input-neon px-3 text-sm" value={displayName} onChange={(e)=>setDisplayName(e.target.value)} placeholder="Your name" />
                   </div>
                   <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3">
-                    <label className="w-full sm:w-40 text-sm text-gray-300">Email</label>
+                    <label className="w-full sm:w-40 text-sm text-muted">Email</label>
                     <input type="email" className="flex-1 h-10 input-neon px-3 text-sm opacity-70" value={(user as any)?.email || ''} disabled />
                   </div>
                   {profileMsg && (<div className={profileMsg.type === 'success' ? 'text-green-600 text-sm' : 'text-red-600 text-sm'}>{profileMsg.text}</div>)}
@@ -220,9 +225,9 @@ export default function SettingsPage() {
             </div>
           </section>
         )}
-        {tab === 'password' && (
+    {tab === 'password' && (
           <section className="mb-6">
-            <h2 className="text-sm font-medium text-gray-200 mb-2">Change password</h2>
+      <h2 className="text-sm font-medium text-ink mb-2">Change password</h2>
             <div className="panel-glass rounded-apple border border-white/10 p-3">
               {!user ? (
                 <p className="text-sm text-ink/60">Sign in to manage your password.</p>
@@ -231,15 +236,15 @@ export default function SettingsPage() {
               ) : (
                 <form onSubmit={handleChangePassword} className="space-y-3">
                   <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3">
-                    <label className="w-full sm:w-40 text-sm text-gray-300">Current password</label>
+          <label className="w-full sm:w-40 text-sm text-ink">Current password</label>
                     <input type="password" className="flex-1 h-10 input-neon px-3 text-sm" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} placeholder="••••••••" />
                   </div>
                   <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3">
-                    <label className="w-full sm:w-40 text-sm text-gray-300">New password</label>
+          <label className="w-full sm:w-40 text-sm text-ink">New password</label>
                     <input type="password" className="flex-1 h-10 input-neon px-3 text-sm" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="At least 8 characters" required minLength={8} />
                   </div>
                   <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3">
-                    <label className="w-full sm:w-40 text-sm text-gray-300">Confirm new password</label>
+          <label className="w-full sm:w-40 text-sm text-ink">Confirm new password</label>
                     <input type="password" className="flex-1 h-10 input-neon px-3 text-sm" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} placeholder="Repeat new password" required minLength={8} />
                   </div>
                   {pwMessage && (<div className={pwMessage.type === 'success' ? 'text-green-600 text-sm' : 'text-red-600 text-sm'}>{pwMessage.text}</div>)}
@@ -253,18 +258,18 @@ export default function SettingsPage() {
         )}
         {tab === 'notifications' && (
           <section className="mb-6">
-            <h2 className="text-sm font-medium text-gray-200 mb-2">Notifications</h2>
+      <h2 className="text-sm font-medium text-ink mb-2">Notifications</h2>
             <form onSubmit={saveNotifications} className="panel-glass rounded-apple border border-white/10 p-3 space-y-3">
               <div className="flex items-center justify-between py-2">
-                <span className="text-sm text-gray-200">Email notifications</span>
+        <span className="text-sm text-ink">Email notifications</span>
                 <Toggle checked={notifEmail} onChange={setNotifEmail} />
               </div>
               <div className="flex items-center justify-between py-2">
-                <span className="text-sm text-gray-200">SMS notifications</span>
+        <span className="text-sm text-ink">SMS notifications</span>
                 <Toggle checked={notifSms} onChange={setNotifSms} />
               </div>
               <div className="flex items-center justify-between py-2">
-                <span className="text-sm text-gray-200">Task reminders</span>
+        <span className="text-sm text-ink">Task reminders</span>
                 <Toggle checked={notifTaskReminders} onChange={setNotifTaskReminders} />
               </div>
               {notifMsg && <div className="text-xs text-gray-300">{notifMsg}</div>}
@@ -274,20 +279,13 @@ export default function SettingsPage() {
             </form>
           </section>
         )}
-        {tab === 'appearance' && (
+  {tab === 'appearance' && (
           <section className="mb-6">
-            <h2 className="text-sm font-medium text-gray-200 mb-2">Appearance</h2>
+      <h2 className="text-sm font-medium text-ink mb-2">Appearance</h2>
             <form onSubmit={saveAppearance} className="panel-glass rounded-apple border border-white/10 p-3 space-y-3">
-              <div className="flex items-center justify-between py-2">
-                <span className="text-sm text-gray-200">Reduce motion</span>
-                <Toggle checked={reduceMotion} onChange={setReduceMotion} />
-              </div>
-              <div className="flex items-center justify-between py-2">
-                <span className="text-sm text-gray-200">Compact mode</span>
-                <Toggle checked={compactMode} onChange={setCompactMode} />
-              </div>
+        {/* Reduced options: removed Reduce motion and Compact mode */}
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3">
-                <label className="w-full sm:w-40 text-sm text-gray-300">Chat background</label>
+        <label className="w-full sm:w-40 text-sm text-ink">Chat background</label>
                 <select className="flex-1 h-10 input-neon px-3 text-sm" value={chatBgPreset} onChange={(e)=>setChatBgPreset(e.target.value as any)}>
                   <option value="default">Default</option>
                   <option value="midnight">Midnight</option>
@@ -295,7 +293,7 @@ export default function SettingsPage() {
                 </select>
               </div>
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3">
-                <label className="w-full sm:w-40 text-sm text-gray-300">Bot bubble color</label>
+        <label className="w-full sm:w-40 text-sm text-ink">Bot bubble color</label>
                 <input type="color" className="h-10 w-16 rounded-md border border-white/10" value={chatBotColor || '#1E3A8A'} onChange={(e)=>setChatBotColor(e.target.value)} />
                 <span className="text-xs text-gray-400">Applies to chat bot message bubbles</span>
               </div>
@@ -304,14 +302,6 @@ export default function SettingsPage() {
                 <button type="submit" className="btn-neon text-sm px-4 py-2">Save</button>
               </div>
             </form>
-          </section>
-        )}
-        {tab === 'security' && (
-          <section className="mb-10">
-            <h2 className="text-sm font-medium text-gray-200 mb-2">Security</h2>
-            <div className="panel-glass rounded-apple border border-white/10 p-3 space-y-3">
-              <div className="text-xs text-gray-400">You can log out from the top-right menu. Two-factor auth and device management are coming soon.</div>
-            </div>
           </section>
         )}
       </div>

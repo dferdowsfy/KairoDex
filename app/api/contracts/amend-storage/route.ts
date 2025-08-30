@@ -1,8 +1,8 @@
 export const runtime = 'edge'
 
 import { NextRequest } from 'next/server'
-import { supabaseServer } from '@/lib/supabaseServer'
 import { aiComplete } from '@/lib/ai'
+import { createClient } from '@supabase/supabase-js'
 
 /*
 POST /api/contracts/amend-storage
@@ -30,7 +30,13 @@ export async function POST(req: NextRequest) {
     
     console.log('✅ Valid request:', { contractFileId, naturalChanges: naturalChanges.substring(0, 50) + '...', clientId })
 
-    const supabase = supabaseServer()
+    // Use service role for server-side DB access (RLS-safe)
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL
+    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+    if (!supabaseUrl || !supabaseKey) {
+      return new Response(JSON.stringify({ error: 'Supabase configuration missing' }), { status: 500 })
+    }
+    const supabase = createClient(supabaseUrl, supabaseKey)
     
     // Get the original contract file metadata
     console.log('📋 Fetching contract from database...')

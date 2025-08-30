@@ -117,7 +117,7 @@ export default function FollowUpPage() {
 
           <div>
             <div className="text-xs text-ink/60 mb-1">Instruction</div>
-            <textarea className="w-full min-h-[120px] input-neon p-3 text-base" value={instruction} onChange={e=>setInstruction(e.target.value)} placeholder="Add extra context or requests" />
+            <textarea className="w-full min-h-[120px] input-neon p-3 text-base text-black placeholder-black/70" value={instruction} onChange={e=>setInstruction(e.target.value)} placeholder="Add extra context or requests" />
           </div>
 
           <div className="mt-3 flex gap-2">

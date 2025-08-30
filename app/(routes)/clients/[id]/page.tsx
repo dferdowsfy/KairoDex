@@ -182,7 +182,7 @@ export default function ClientDetailPage() {
 
   return (
   <main key={id} className="min-h-screen" style={{ background: 'var(--page-bg)' }}>
-      <div className="max-w-7xl mx-auto p-6 space-y-6">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6">
         {hasError && (
           <div className="text-center py-12">
             <div className="text-lg text-red-600">Failed to load client dashboard.</div>
@@ -235,7 +235,7 @@ export default function ClientDetailPage() {
         </div>
 
         {/* Glass Tile Grid */}
-  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
           
   {/* Budget Tile */}
       <div className="relative overflow-hidden rounded-apple p-6 tile-soft">
@@ -337,7 +337,7 @@ export default function ClientDetailPage() {
   {/* Quick Actions moved to header */}
 
   {/* AI Tools */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-8">
+  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6 mt-8">
           {/* Vibrant flat card: Follow-up */}
           <div className="relative overflow-hidden p-6 ai-card ai-card-blue">
             <div className="relative z-10 space-y-4">
@@ -405,7 +405,7 @@ export default function ClientDetailPage() {
                 value={changeText}
                 onChange={e => setChangeText(e.target.value)}
                 placeholder="Describe the changes in natural language (e.g., move closing to Sept 15, add 7-day inspection contingency)."
-  className="w-full min-h-[120px] input-neon px-3 py-2 placeholder-amber-200/70"
+  className="w-full min-h-[120px] input-neon px-3 py-2 text-black placeholder-black/70"
               />
               <button
                 onClick={handleAmendContracts}

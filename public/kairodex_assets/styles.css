@@ -1,0 +1,66 @@
+/* Design tokens */
+:root{
+  --bg:#F5F3EF; --ink:#2D2D2D; --muted:#666;
+  --cta:#FF6F3C; --cta-hover:#E85E2F;
+  --mint:#7AB8A4; --sand:#E8D9C9; --yellow:#F7C873;
+  --card:#FFFFFF; --radius:16px; --shadow:0 10px 30px rgba(0,0,0,.07);
+}
+*{box-sizing:border-box}
+body{
+  margin:0; font-family:Inter,system-ui,Arial; color:var(--ink); background:var(--bg);
+}
+.wrap{max-width:1100px; margin:0 auto; padding:24px 18px 80px}
+
+/* Topbar */
+.topbar{display:flex; align-items:center; justify-content:space-between; gap:12px}
+.navbtns{display:flex; gap:12px}
+.btn{
+  display:inline-block; text-decoration:none; font-weight:700; padding:10px 16px; border-radius:10px;
+  transition:.2s ease; box-shadow:none; border:0;
+}
+.btn-primary{background:var(--cta); color:#fff; box-shadow:0 8px 18px rgba(255,111,60,.22)}
+.btn-primary:hover{background:var(--cta-hover)}
+.btn-ghost{background:#E5DED7; color:#2d2d2d}
+.btn-ghost:hover{background:#D9D2CB}
+
+/* Hero */
+.hero{
+  margin-top:28px; display:grid; grid-template-columns:1.1fr .9fr; gap:34px; align-items:center;
+  background:
+    radial-gradient(1100px 380px at -10% 0%, #fff7, transparent 60%),
+    radial-gradient(1000px 360px at 115% 15%, #FFD9C788, transparent 60%),
+    var(--bg);
+  border-radius:24px; padding:42px 30px; box-shadow:var(--shadow);
+}
+.tag{display:inline-block; padding:6px 12px; border-radius:999px; background:var(--sand); color:#5a5249; font-weight:700; font-size:.82rem}
+.hero h1{font-size:2.7rem; margin:10px 0 8px; line-height:1.1}
+.hero p{color:var(--muted); margin:0 0 18px}
+.cta-row{display:flex; gap:12px; flex-wrap:wrap}
+
+/* Hero visual panel */
+.panel{
+  position:relative; height:260px; background:#fff; border-radius:22px; box-shadow:var(--shadow);
+}
+.chip{
+  position:absolute; top:18px; left:62px; background:linear-gradient(180deg,#FFE2D7,#FFD3C3);
+  color:#5a5249; border-radius:999px; padding:6px 12px; font-weight:700; font-size:.85rem; box-shadow:0 8px 20px rgba(0,0,0,.06)
+}
+.micro{position:absolute; width:44px; height:44px; background:#fff; padding:10px; border-radius:12px; box-shadow:var(--shadow)}
+.bulb{top:14px; left:14px} .chat{top:14px; right:14px}
+.gear{bottom:14px; left:14px}
+
+/* Features */
+.features{display:grid; grid-template-columns:repeat(3,1fr); gap:18px; margin-top:36px}
+.card{background:var(--card); border-radius:var(--radius); box-shadow:var(--shadow); padding:18px}
+.card .ico{width:38px; height:38px}
+.card h3{margin:12px 0 6px; font-size:1.05rem}
+.card p{margin:0; color:var(--muted)}
+
+/* Footer */
+.foot{text-align:center; color:#8b8b8b; margin-top:36px}
+
+/* Responsive */
+@media (max-width:900px){
+  .hero{grid-template-columns:1fr; padding:34px 22px}
+  .features{grid-template-columns:1fr}
+}

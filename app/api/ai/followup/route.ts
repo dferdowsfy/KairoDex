@@ -27,21 +27,45 @@ export async function POST(req: NextRequest) {
     }
 
     // Fetch client context if provided
-    let client: any = null
-    let sheetRow: any | null = null
+  let client: any = null
+  let sheetRow: any | null = null
+  let structuredNotes: any[] = []
     if (clientId) {
   // Sheets row for this client (match by id/email/name)
   try { sheetRow = await findSheetRowByHints({ id: clientId }) } catch {}
   if (sheetRow) client = sheetRowToClient(sheetRow)
+  // Also load structured normalized items from Supabase
+  try {
+    const supabase = supabaseServer()
+    const { data: ni } = await supabase
+      .from('normalized_items')
+      .select('kind,title,date,status,party,tags,created_at')
+      .eq('client_id', clientId)
+      .order('date', { ascending: true })
+      .order('created_at', { ascending: false })
+      .limit(50)
+    if (Array.isArray(ni)) structuredNotes = ni
+  } catch {}
     }
 
-  const system = `You are AgentHub’s assistant. Use provided CLIENT_CONTEXT only. Draft concise, friendly follow-ups in the selected channel. Insert short placeholders like [time] when details are missing. End with 'Next info needed:' only if concrete items are missing. Prefer details from SHEET_ROW when present.`
-  const clientContext = clientId ? { client, lastNotes: [], sheetRow } : { client: null, lastNotes: [], sheetRow: null }
+  const system = `You are Kairodex’s assistant.
+Writing constraints:
+- Use only CLIENT_CONTEXT; do not invent facts or commitments.
+- Keep it tight: 4–7 short sentences max for email; 2–3 for SMS.
+- Use the client's preferred method if present; otherwise use the requested channel.
+- If key details are missing, use square-bracket placeholders like [time] or [address].
+- End with a single line 'Next info needed:' only if concrete items are missing.
+- Maintain a professional, warm tone and avoid repetition.
+
+Grounding:
+- Prefer STRUCTURED_NOTES (normalized items) and then fields from SHEET_ROW when present. If a field is unknown, omit it.
+- If a do-not-contact flag is true, do not draft outreach; instead, return a short internal checklist.`
+  const clientContext = clientId ? { client, lastNotes: [], sheetRow, structured_notes: structuredNotes } : { client: null, lastNotes: [], sheetRow: null, structured_notes: [] }
 
     const prompt = `CLIENT_CONTEXT:\n${JSON.stringify(clientContext, null, 2)}\nChannel: ${channel}\nInstruction: ${instruction ?? 'Draft a brief, friendly follow-up email.'}`
 
   // Call AI using provider selected via env keys
-  const draft: string = await aiComplete(system, prompt)
+  const draft: string = await aiComplete(system, prompt, { temperature: 0.3 })
 
   // Optional persistence
   if (save && clientId) {

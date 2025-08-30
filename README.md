@@ -3,16 +3,9 @@
 Mobile‑first AI‑native real estate CRM built with Next.js App Router, Tailwind, Supabase, TanStack Query, Zustand, and next‑pwa.
 
 ## Features
-- Mobile‑first UI with fixed bottom navigation and safe‑area handling
-- Theme presets plus full custom color editor (Profile page)
-- Tasks with iOS‑style wheel date/time picker and reminder text
-- Dashboard with Latest Notes (full width) and side‑by‑side Email Generator + Contracts
-- Right‑side chat drawer with slide animations and dark theme bubbles
-- Mock/live data toggle (Supabase or in‑memory mocks)
-- PWA with offline caching and background sync for API
-
-## Getting started
-
+ - Live city market snapshots in Chat (when OPENROUTER_API_KEY is set) with sources
+- Notes → Tiles: paste unstructured notes and get editable tiles for key dates, next steps, contacts, docs, risks. Inline edit and persist to Supabase.
+- Follow-Up composer prefills from NoteItems, with include/exclude checkboxes and email scheduling.
 1. Copy env and set values:
 
 ```
@@ -23,14 +16,24 @@ Set:
 - NEXT_PUBLIC_SUPABASE_URL=
 - NEXT_PUBLIC_SUPABASE_ANON_KEY=
 - OPENROUTER_API_KEY=
+ - Optional: AI provider keys in `lib/ai.ts` (OPENAI_API_KEY or GEMINI_API_KEY)
+ - Optional: MARKET_CACHE_TTL_MS (default 6h), MARKET_OPENROUTER_MODEL (default perplexity/sonar-reasoning-pro)
 
 2. Dev server:
 
 ```
 npm run dev
-This starts Next.js on the next available port (3000/3001).
+## Security and Auth
 
-3. Typecheck, build, and test:
+- Password policy (enforced server + client):
+  - Min length 12; must include upper, lower, digit, and symbol.
+  - Reject common and breached passwords (HaveIBeenPwned k-anonymity API; set HIBP_CHECK=off to skip network calls).
+  - Blocks trivial variants of email/name and repeating/sequence patterns.
+- Rate limiting: signup/login/reset are limited by IP+device fingerprint.
+- Password reset: POST /api/auth/reset/request then follow email link to /reset-password.
+- Session cookies: HttpOnly, Secure, SameSite=Strict. Idle timeout and absolute lifetime configurable via SESSION_IDLE_MIN and SESSION_ABS_HOURS.
+- MFA endpoints are scaffolded under /api/auth/mfa (501 until wired to a TOTP provider).
+This starts Next.js on the next available port (3000/3001).
 
 ```
 npm run typecheck
@@ -143,6 +146,7 @@ npm run test
 ## Troubleshooting
 - If images don’t appear, ensure `public/img/` exists with `avatar.svg` and `property.svg`.
 - If Supabase isn’t configured, the app falls back to mock data.
+ - If live market answers look generic, ensure OPENROUTER_API_KEY is present; the chatbot uses Perplexity via OpenRouter to fetch current city trends and returns citations.
 - For iOS standalone PWA safe‑area spacing, keep the bottom nav enabled.
 
 ## Notes

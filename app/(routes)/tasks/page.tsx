@@ -95,8 +95,8 @@ export default function TasksPage() {
 
   // React to dashboard quick links
   useEffect(() => {
-    const quick = params.get('quick')
-    const view = params.get('view')
+  const quick = params?.get('quick')
+  const view = params?.get('view')
     if (quick === 'emails') {
       const email = (activeClient as any)?.email
       if (email) window.location.href = `mailto:${email}?subject=${encodeURIComponent('Follow-up')}`
@@ -415,7 +415,7 @@ export default function TasksPage() {
               </div>
               <div className="mt-3">
                 <div className="text-xs text-ink/60 mb-1">Instruction</div>
-                <textarea className="w-full min-h-[120px] input-neon p-3 text-base" value={fuInstruction} onChange={e=>setFuInstruction(e.target.value)} placeholder="Add extra context or requests" />
+                <textarea className="w-full min-h-[120px] input-neon p-3 text-base text-black placeholder-black/70" value={fuInstruction} onChange={e=>setFuInstruction(e.target.value)} placeholder="Add extra context or requests" />
               </div>
               <div className="mt-3 flex flex-wrap gap-2 items-center">
                 <button onClick={async ()=>{
@@ -659,7 +659,7 @@ export default function TasksPage() {
                     <div className="md:col-span-2">
                       <div className="text-sm text-white/90 mb-3 font-semibold">Describe your changes</div>
                       <textarea 
-                        className="w-full min-h-[120px] input-neon p-4 text-lg font-medium" 
+                        className="w-full min-h-[120px] input-neon p-4 text-lg font-medium text-black placeholder-black/70" 
                         placeholder="e.g., extend closing date by 10 days; increase earnest money to $5,000; add inspection contingency." 
                         value={nlCommand} 
                         onChange={e => setNlCommand(e.target.value)} 

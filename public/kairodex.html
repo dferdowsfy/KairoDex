@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>KairoDex</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/kairodex.css" />
+  <meta name="description" content="Right time. Right opportunity. Simplified for agents." />
+  <meta name="robots" content="noindex,follow">
+</head>
+<body>
+  <div class="bg-waves" aria-hidden="true">
+    <!-- Soft organic blobs -->
+    <svg class="wave-1" viewBox="0 0 900 700" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M424 78c88-22 212-21 296 31 69 42 79 112 65 178-16 77-78 131-138 183-61 52-119 109-197 128-96 24-214 2-289-61C82 475 57 400 68 327c10-68 53-118 116-158 63-41 152-69 240-91Z" fill="#E9E6E0"/>
+    </svg>
+    <svg class="wave-2" viewBox="0 0 900 700" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M495 80c96 15 177 58 224 120 47 62 60 142 26 206-33 63-111 108-192 137-81 28-165 41-244 20-79-22-152-79-177-152-24-73-1-163 63-223 64-61 166-93 300-108Z" fill="#F0ECE6"/>
+    </svg>
+  </div>
+
+  <header class="header">
+    <div class="container nav">
+      <a class="logo" href="/">
+        <!-- House + growth arrow mark in orange -->
+        <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <defs>
+            <linearGradient id="grad" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#FF6F3C" />
+              <stop offset="100%" stop-color="#ff9055" />
+            </linearGradient>
+          </defs>
+          <path d="M8 30 32 12l24 18v18a4 4 0 0 1-4 4H12a4 4 0 0 1-4-4V30Z" fill="url(#grad)" opacity=".25"/>
+          <path d="M12 28.5 32 14l20 14.5V48a2 2 0 0 1-2 2H14a2 2 0 0 1-2-2V28.5Z" fill="none" stroke="#FF6F3C" stroke-width="3.2" stroke-linejoin="round"/>
+          <path d="M22 40l8-8 6 6 10-10" fill="none" stroke="#FF6F3C" stroke-width="3.2" stroke-linecap="round"/>
+        </svg>
+        <span class="logo-title">KairoDex</span>
+      </a>
+      <nav class="actions">
+        <a class="btn btn-ghost" href="/login">Login</a>
+        <a class="btn btn-primary" href="/signup">Sign Up</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="container hero-grid">
+        <div class="hero-copy">
+          <div class="h-eyebrow">For modern agents</div>
+          <h1 class="h-title">Welcome to KairoDex</h1>
+          <p class="h-sub">Right time. Right opportunity. Simplified for agents.</p>
+        </div>
+        <div class="illus-wrap">
+          <div class="illus-card">
+            <!-- Hero image with multiple fallbacks -->
+            <img class="agent agent-img" src="/illustrations/kairode-hero.png" alt="Agent at laptop" width="640" height="420" 
+                 onerror="this.onerror=null;this.src='/illustrations/hero.png'" 
+                 onload="console.log('Hero image loaded successfully')" />
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="features">
+      <div class="container">
+        <div class="cards">
+          <article class="card">
+            <div class="icon mail">
+              <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16v12H4z"/><path d="m4 7 8 6 8-6"/></svg>
+            </div>
+            <h3>Automated Follow-Ups</h3>
+            <p>AI keeps your clients engaged with timely, personalized emails &amp; texts.</p>
+            <details class="card-details">
+              <summary class="expand-btn">View details</summary>
+              <ul class="bullets">
+                <li><span class="chip">Smart timing</span> Sends at the right moment for higher reply rates.</li>
+                <li><span class="chip">Personalized</span> Uses client context and past activity.</li>
+                <li><span class="chip">Multi-channel</span> Email and SMS from one queue.</li>
+              </ul>
+            </details>
+          </article>
+          <article class="card">
+            <div class="icon doc">
+              <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h6"/></svg>
+            </div>
+            <h3>Smart Documents</h3>
+            <p>Contracts updated instantly, e-signed, and stored securely.</p>
+            <details class="card-details">
+              <summary class="expand-btn">View details</summary>
+              <ul class="bullets">
+                <li><span class="chip">One-click</span> Apply amendments and regenerate PDFs.</li>
+                <li><span class="chip">E‑Sign</span> DocuSign sender view without leaving KairoDex.</li>
+                <li><span class="chip">Versioning</span> Track changes and keep an audit trail.</li>
+              </ul>
+            </details>
+          </article>
+          <article class="card">
+            <div class="icon ring">
+              <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a10 10 0 1 1-9.95 9h9.95Z"/></svg>
+            </div>
+            <h3>Lead Insights</h3>
+            <p>Know which clients are ready to buy with AI-powered scoring.</p>
+            <details class="card-details">
+              <summary class="expand-btn">View details</summary>
+              <ul class="bullets">
+                <li><span class="chip">Scoring</span> Prioritize the hottest prospects first.</li>
+                <li><span class="chip">Signals</span> Surface intent from emails and events.</li>
+                <li><span class="chip">Next steps</span> Clear actions to move deals forward.</li>
+              </ul>
+            </details>
+          </article>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="container">© <span id="year"></span> KairoDex • Built for agents</div>
+  </footer>
+
+  <script>
+    document.getElementById('year').textContent = new Date().getFullYear().toString();
+  </script>
+</body>
+</html>

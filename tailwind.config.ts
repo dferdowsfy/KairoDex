@@ -20,7 +20,7 @@ const config: Config = {
         warnSoft: '#FEF3C7',
         danger: '#EF4444',
         dangerSoft: '#FEE2E2',
-        ink: '#0F172A',
+  ink: '#000000',
         surface: '#F6F7FB',
         card: '#FFFFFF'
       },
