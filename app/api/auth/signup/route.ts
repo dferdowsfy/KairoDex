@@ -19,7 +19,26 @@ export async function POST(req: Request) {
   if (!policy.ok) return NextResponse.json({ error: 'Weak password', issues: policy.issues }, { status: 400 })
 
   const supabase = supabaseServer()
-  const { data, error } = await (supabase as any).auth.signUp({ email, password, options: { data: { first_name: firstName, last_name: lastName } } })
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+  
+  const { data, error } = await (supabase as any).auth.signUp({ 
+    email, 
+    password, 
+    options: { data: { first_name: firstName, last_name: lastName } } 
+  })
+  
+  if (error) {
+    // Check if error indicates user already exists
+    if (error.message.includes('already') || error.message.includes('exists') || error.message.includes('registered')) {
+      return NextResponse.json({ error: 'An account with this email already exists. Please log in instead.' }, { status: 400 })
+    }
+    return NextResponse.json({ error: error.message }, { status: 400 })
+  }
+  
+  // Check if user already existed (Supabase sometimes returns existing user without error)
+  if (data.user && data.user.email_confirmed_at) {
+    // If email is already confirmed, this user already existed
+    return NextResponse.json({ error: 'An account with this email already exists. Please log in instead.' }, { status: 400 })
+  }
+  
   return NextResponse.json({ user: data.user, message: 'Check email to confirm account.' })
 }

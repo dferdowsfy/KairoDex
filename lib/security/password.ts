@@ -62,11 +62,11 @@ function hasRepeatingSequences(password: string) {
 export async function checkPasswordPolicy(input: PasswordCheckInput): Promise<PasswordCheckResult> {
   const { password, email, firstName, lastName } = input
   const issues: string[] = []
-  if (!password || password.length < 12) issues.push('Password must be at least 12 characters.')
-  if (!hasUpper(password)) issues.push('Add an uppercase letter.')
-  if (!hasLower(password)) issues.push('Add a lowercase letter.')
-  if (!hasDigit(password)) issues.push('Add a number.')
-  if (!hasSymbol(password)) issues.push('Add a symbol.')
+  // Relaxed policy: minimum length 8 and require at least two character classes
+  if (!password || password.length < 8) issues.push('Password must be at least 8 characters.')
+  const classes = [hasUpper(password), hasLower(password), hasDigit(password), hasSymbol(password)]
+  const classesMet = classes.filter(Boolean).length
+  if (classesMet < 2) issues.push('Use at least two of: uppercase, lowercase, numbers, or symbols.')
   if (COMMON_PASSWORDS.has(password.toLowerCase())) issues.push('Password is too common.')
   if (containsTrivialPersonal(password, email, firstName, lastName)) issues.push('Avoid using your name or email in the password.')
   if (hasRepeatingSequences(password)) issues.push('Avoid repeating or sequential patterns.')

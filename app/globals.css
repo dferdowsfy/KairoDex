@@ -121,8 +121,11 @@ img, video, iframe, embed, object { max-width: 100%; height: auto; }
 /* iOS momentum scrolling on scrollable areas */
 .overflow-auto, .overflow-y-auto, .overflow-x-auto { -webkit-overflow-scrolling: touch; }
 /* Hide scrollbars when explicitly requested */
-.no-scrollbar { scrollbar-width: none; }
-.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { /* intentionally preserved for opt-out; do not apply to client lists */ }
+.visible-scrollbar { scrollbar-width: auto; }
+.visible-scrollbar::-webkit-scrollbar { height: 12px; width: 10px; }
+.visible-scrollbar::-webkit-scrollbar-thumb { background: rgba(15,23,42,0.12); border-radius: 8px; }
+.visible-scrollbar::-webkit-scrollbar-track { background: transparent; }
 /* ensure base text color propagates into headings/anchors unless explicitly overridden */
 h1, h2, h3, h4, h5, h6, p, a, li, span, label, small, strong, em { color: inherit; }
 

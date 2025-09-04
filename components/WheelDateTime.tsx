@@ -1,5 +1,6 @@
 "use client"
 import { useEffect, useMemo, useRef, useState } from 'react'
+import WheelDateDay from './WheelDateDay'
 
 type Props = {
   value?: Date | null
@@ -71,7 +72,24 @@ export default function WheelDateTime({ value, onChange, days = 60, minuteStep =
 
   return (
     <div className="relative grid grid-cols-4 gap-2">
-      <WheelColumn refEl={dateRef} values={dates.map(d => d.label)} index={dateIdx} setIndex={setDateIdx} />
+      <div className="flex gap-2">
+        {/* single scroll container for month+day so they stay aligned */}
+        <div ref={dateRef} onScroll={(e)=>{
+          const el = e.currentTarget
+          // sync date index based on scrollTop
+          const i = Math.round(el.scrollTop / ITEM_H)
+          setDateIdx(Math.max(0, Math.min(dates.length - 1, i)))
+          el.scrollTo({ top: i * ITEM_H, behavior: 'smooth' })
+        }} className="relative h-40 overflow-y-auto snap-y snap-mandatory rounded-lg border border-white/50 bg-white/90" style={{ scrollBehavior: 'smooth' }}>
+          <div style={{ height: ITEM_H }} aria-hidden />
+          <div className="flex">
+            <div className="w-full">
+              <WheelDateDay values={dates.map(d => String(d.da))} index={dateIdx} setIndex={setDateIdx} />
+            </div>
+          </div>
+          <div style={{ height: ITEM_H }} aria-hidden />
+        </div>
+      </div>
       <WheelColumn refEl={hourRef} values={hours.map(n => String(n))} index={hourIdx} setIndex={setHourIdx} />
       <WheelColumn refEl={minRef} values={minutes.map(n => String(n).padStart(2,'0'))} index={minuteIdx} setIndex={setMinuteIdx} />
       <WheelColumn refEl={apRef} values={[...ampm]} index={apIdx} setIndex={setApIdx} />

@@ -1,0 +1,4 @@
+name_first,name_last,email,phone,stage,Notes_Inputted,do_not_contact,external_id,address,tags
+Alex,Rivera,alex@example.com,555-1111,new,"Met at open house; interested in 3BR",false,ext-001,"123 Main St, City, ST","buyer,priority"
+Jamie,Lopez,jamie@example.com,555-2222,new,"Prefers morning appointments; referred by Sam",false,ext-002,,"seller"
+Morgan,Smith,morgan@example.com,555-3333,touring,"Follow-up about pre-approval",true,ext-003,"456 Oak Ave, City, ST","lead"

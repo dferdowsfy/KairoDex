@@ -46,10 +46,10 @@ export default function ClientSelector({ onAddClient }: { onAddClient?: () => vo
         </button>
       </div>
       {open && (
-        <div className="mt-2 max-h-64 overflow-auto rounded-xl border border-slate-200 bg-white shadow-lg">
+        <div className="mt-2 max-h-64 overflow-auto rounded-xl border border-slate-200 bg-white shadow-lg visible-scrollbar">
           {filtered.length === 0 && <div className="p-3 text-sm text-slate-500">No matches</div>}
           <ul>
-            {filtered.slice(0, 12).map(c => (
+            {filtered.map(c => (
               <li key={c.id}>
                 <button
                   onClick={()=>{ setSelectedClientId(c.id); setQuery(c.name || ''); setOpen(false) }}

@@ -7,6 +7,7 @@ import { useNoteItems } from '@/hooks/useNoteItems'
 import type { NoteItem } from '@/lib/types'
 import { useEmailJobs } from '@/hooks/useEmailJobs'
 import CadenceScheduler from '@/components/CadenceScheduler'
+import WheelDateTime from '@/components/WheelDateTime'
 import { useClients } from '@/hooks/useClients'
 
 function extractBudget(items: NoteItem[]) {
@@ -113,7 +114,9 @@ export default function Snapshot() {
   const steps = useMemo(()=>extractNextSteps(items), [items])
   const details = useMemo(()=>extractMoreDetails(items), [items])
   const insights = useMemo(() => extractInsightsStrict(items), [items])
-  const [showMore, setShowMore] = useState(true)
+  const [showMore, setShowMore] = useState(false)
+  const [showAllInsights, setShowAllInsights] = useState(false)
+  const [showAllSteps, setShowAllSteps] = useState(false)
   // Add Note modal state
   const [addOpen, setAddOpen] = useState(false)
   const [addText, setAddText] = useState('')
@@ -287,7 +290,10 @@ export default function Snapshot() {
   function CadenceBlock() {
     return (
       <div className="space-y-3">
-        <CadenceScheduler onChange={(ds)=>setCadenceDates(ds)} />
+        <CadenceScheduler
+          initial={selectedDate && selectedTime ? { startDate: selectedDate, time: selectedTime } : undefined}
+          onChange={(ds)=>setCadenceDates(ds)}
+        />
         <div className="flex items-center justify-end gap-2">
           <button
             type="button"
@@ -301,6 +307,25 @@ export default function Snapshot() {
                 const res = await fetch('/api/email/schedule/batch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ client_id: selectedClientId, to_recipients: to, subject: 'Quick follow-up', body_text: emailDraft, send_at_list }) })
                 const j = await res.json(); if (!res.ok) throw new Error(j?.error || 'Failed to schedule series')
                 pushToast({ type:'success', message: `Scheduled ${send_at_list.length} emails` })
+                // Also persist reminders/notifications for the scheduled series so they appear in the Home Snapshot
+                try {
+                  for (const sa of send_at_list) {
+                    // create a lightweight deadline reminder for each scheduled send
+                    await upsert.mutateAsync({
+                      client_id: selectedClientId,
+                      kind: 'deadline',
+                      title: `Scheduled: Quick follow-up (email)`,
+                      status: 'scheduled',
+                      date: sa,
+                      tags: Array.from(new Set([...(client as any)?.email ? ['scheduled_email'] : [] , 'reminder'])),
+                      source: 'user_note'
+                    } as any)
+                  }
+                  pushToast({ type: 'success', message: 'Saved scheduled reminders to dashboard', subtle: true })
+                } catch (e:any) {
+                  // non-fatal: scheduling succeeded but saving reminders failed
+                  pushToast({ type:'error', message: e?.message || 'Scheduled but failed to save reminders' })
+                }
                 setEmailOpen(false)
               } catch(e:any) { pushToast({ type:'error', message: e?.message || 'Batch schedule failed' }) }
               finally { setEmailBusy(false) }
@@ -320,7 +345,7 @@ export default function Snapshot() {
       <div className="flex items-start gap-2">
         <div className="min-w-0">
           <div className="text-slate-900 font-semibold text-xl">Snapshot</div>
-          <div className="text-3xl font-semibold text-slate-900 mt-1">{(client as any)?.name || [ (client as any)?.first_name, (client as any)?.last_name ].filter(Boolean).join(' ') || '—'}</div>
+          <div className="text-2xl font-semibold text-slate-900 mt-1">{(client as any)?.name || [ (client as any)?.first_name, (client as any)?.last_name ].filter(Boolean).join(' ') || '—'}</div>
           <div className="mt-2 flex flex-wrap items-center gap-2">
             {/* Stage capsule */}
             {(client as any)?.stage && (
@@ -358,7 +383,7 @@ export default function Snapshot() {
               <div>
                 <div className="font-medium text-slate-900 mb-1">Reminders</div>
                 <ul className="space-y-2 text-slate-800">
-                  {reminders.slice(0,8).map(r => {
+                  {reminders.slice(0,4).map(r => {
                     const id = r.id || r.title+(r.date||'')
                     const completing = r.id ? completingIds.has(r.id) : false
                     return (
@@ -405,24 +430,29 @@ export default function Snapshot() {
         <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4">
           <div className="text-xl font-semibold text-slate-900">Key Insights</div>
           <ul className="mt-3 space-y-2">
-            {insights.map((t, idx)=> (
+            {insights.slice(0, showAllInsights ? 10 : 3).map((t, idx)=> (
               <li
                 key={idx}
-                className={`flex items-start gap-3 rounded-xl border p-3 md:p-3.5 transition-colors 
+                className={`flex items-start gap-3 rounded-xl border p-2 transition-colors text-sm leading-5 shadow-sm ring-1 ring-transparent hover:ring-opacity-60 focus-within:ring-opacity-80 ${idx % 5 === 0 ? 'ring-rose-50' : idx % 5 === 1 ? 'ring-amber-50' : idx % 5 === 2 ? 'ring-emerald-50' : idx % 5 === 3 ? 'ring-sky-50' : 'ring-violet-50'} text-slate-900 
                   ${['bg-rose-50','bg-amber-50','bg-emerald-50','bg-sky-50','bg-violet-50'][idx % 5]} 
                   ${['border-rose-200','border-amber-200','border-emerald-200','border-sky-200','border-violet-200'][idx % 5]}
                 `}
               >
                 <span
-                  className={`mt-1.5 h-3.5 w-3.5 rounded-full flex-shrink-0 
+                  className={`mt-1 h-3 w-3 rounded-full flex-shrink-0 
                     ${['bg-rose-400','bg-amber-400','bg-emerald-400','bg-sky-400','bg-violet-400'][idx % 5]}
                   `}
                   aria-hidden="true"
                 />
-                <span className="text-[1.1rem] leading-7 text-slate-900">{t}</span>
+                <span className="text-slate-900 line-clamp-2">{t}</span>
               </li>
             ))}
           </ul>
+          {insights.length > 3 && (
+            <div className="mt-2">
+              <button type="button" className="text-sm text-slate-600" onClick={()=>setShowAllInsights(s=>!s)}>{showAllInsights ? 'Show less' : `Show ${insights.length - 3} more`}</button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -432,21 +462,26 @@ export default function Snapshot() {
           <button type="button" className="ml-auto h-9 px-4 rounded-xl bg-sky-50 text-slate-900 border border-sky-200" onClick={addAllToFollowUp}>Add to Follow‑Up</button>
         </div>
         <ul className="mt-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-          {steps.length ? steps.map((s)=> (
+          {steps.length ? steps.slice(0, showAllSteps ? 12 : 6).map((s)=> (
             <li
               key={s.id}
-              className="flex items-start gap-3 rounded-xl border p-3 md:p-3.5 bg-cyan-50 border-cyan-200 min-h-[72px]"
+              className="flex items-start gap-3 rounded-xl border p-2 bg-cyan-50 border-cyan-200 min-h-[56px] shadow-sm ring-1 ring-transparent hover:ring-sky-50/40 text-slate-900"
             >
-              <span className="mt-1 h-3.5 w-3.5 rounded-full flex-shrink-0 bg-cyan-400" aria-hidden="true" />
+              <span className="mt-1 h-2.5 w-2.5 rounded-full flex-shrink-0 bg-cyan-400" aria-hidden="true" />
               <div className="flex-1 min-w-0">
-                <div className="text-[1.02rem] leading-6 text-slate-900 break-words">{s.title || s.body}</div>
+                <div className="text-sm leading-5 text-slate-900 break-words line-clamp-2">{s.title || s.body}</div>
               </div>
-              <button type="button" className="ml-2 text-xs rounded-xl px-3 py-1 bg-sky-50 text-slate-900 border border-sky-200 shrink-0" onClick={()=>addReminder(s)}>Add Reminder</button>
+              <button type="button" className="ml-2 text-xs rounded-xl px-3 py-1 bg-sky-50 text-slate-900 border border-sky-200 shrink-0" onClick={()=>addReminder(s)}>Add</button>
             </li>
           )) : (
             <li className="text-slate-500">No next steps yet</li>
           )}
         </ul>
+        {steps.length > 6 && (
+          <div className="mt-2">
+            <button type="button" className="text-sm text-slate-600" onClick={()=>setShowAllSteps(s=>!s)}>{showAllSteps ? 'Show less' : `Show ${steps.length - 6} more`}</button>
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-[1fr] gap-4">
@@ -481,10 +516,10 @@ export default function Snapshot() {
         {(details.text || '—').split(/\n+/).filter(Boolean).map((line, i)=> (
                 <li
                   key={i}
-          className="flex items-start gap-3 rounded-xl border p-3 md:p-3.5 bg-indigo-50 border-indigo-200"
+          className="flex items-start gap-3 rounded-xl border p-2 bg-indigo-50 border-indigo-200 shadow-sm ring-1 ring-indigo-50 text-slate-900"
                 >
-          <span className="mt-1.5 h-3.5 w-3.5 rounded-full flex-shrink-0 bg-indigo-400" aria-hidden="true" />
-                  <span className="text-[1.05rem] leading-7">{line}</span>
+          <span className="mt-1 h-3 w-3 rounded-full flex-shrink-0 bg-indigo-400" aria-hidden="true" />
+                  <span className="text-sm leading-5 line-clamp-2">{line}</span>
                 </li>
               ))}
             </ul>
@@ -558,19 +593,19 @@ export default function Snapshot() {
                 <span>{emailBusy? 'Generating…':'Generate'}</span>
               </button>
             </div>
-            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 min-h-[140px] whitespace-pre-wrap text-slate-900">{emailDraft || 'Your AI‑generated draft will appear here.'}</div>
-            <div className="rounded-xl border border-slate-200 bg-white p-3 space-y-3">
+            <div className="rounded-xl border border-slate-300 bg-slate-50 p-3 min-h-[140px] whitespace-pre-wrap text-slate-900 shadow-sm ring-1 ring-slate-50">{emailDraft || 'Your AI‑generated draft will appear here.'}</div>
+            <div className="rounded-xl border border-slate-300 bg-white p-3 space-y-3 shadow-sm ring-1 ring-slate-50">
               <div className="font-medium text-slate-900">Schedule</div>
-              <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden">
-                <button type="button" onClick={()=>setScheduleMode('single')} className={`px-3 py-1 text-sm ${scheduleMode==='single'?'bg-slate-900 text-white':'bg-white text-slate-900'}`}>Single</button>
-                <button type="button" onClick={()=>setScheduleMode('cadence')} className={`px-3 py-1 text-sm ${scheduleMode==='cadence'?'bg-slate-900 text-white':'bg-white text-slate-900'}`}>Cadence</button>
+              <div className="flex gap-2">
+                <button type="button" onClick={()=>setScheduleMode('single')} aria-pressed={scheduleMode==='single'} className={`px-4 py-2 rounded-lg text-sm border transition-colors ${scheduleMode==='single'?'bg-slate-900 text-white border-slate-900':'bg-white text-slate-900 border-slate-200 hover:border-slate-300'}`}>Single</button>
+                <button type="button" onClick={()=>setScheduleMode('cadence')} aria-pressed={scheduleMode==='cadence'} className={`px-4 py-2 rounded-lg text-sm border transition-colors ${scheduleMode==='cadence'?'bg-slate-900 text-white border-slate-900':'bg-white text-slate-900 border-slate-200 hover:border-slate-300'}`}>Cadence</button>
               </div>
 
               {scheduleMode==='single' ? (
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <div>
                     <div className="text-sm text-slate-600 mb-1">Calendar</div>
-                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-2">
+                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
                       {/* Month navigation */}
                       <div className="flex items-center justify-between mb-2">
                         <button type="button" className="px-2 py-1 rounded border border-slate-200 bg-white text-slate-900 hover:bg-slate-50" onClick={()=>{
@@ -610,19 +645,23 @@ export default function Snapshot() {
                         }
                         while (cells.length % 7 !== 0) cells.push({})
                         return (
-                          <div className="grid grid-cols-7 gap-2">
-                            {cells.map((c, idx) => {
-                              const selected = !!c.dateStr && selectedDate===c.dateStr
-                              return (
-                                <button key={idx} type="button" disabled={!c.day}
-                                  onClick={()=> c.dateStr && setSelectedDate(c.dateStr)}
-                                  aria-pressed={selected}
-                                  className={`inline-flex items-center justify-center w-12 h-12 sm:w-14 sm:h-14 rounded-full border ${c.day ? (selected? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-900 border-slate-200 hover:bg-slate-50') : 'opacity-0 pointer-events-none'}`}
-                                >
-                                  {c.day ? <span className="text-sm sm:text-base font-medium">{c.day}</span> : null}
-                                </button>
-                              )
-                            })}
+                          <div className="overflow-x-auto">
+                            <div className="min-w-[360px]">
+                              <div className="grid grid-cols-7 gap-3">
+                                {cells.map((c, idx) => {
+                                  const selected = !!c.dateStr && selectedDate===c.dateStr
+                                  return (
+                                    <button key={idx} type="button" disabled={!c.day}
+                                      onClick={()=> c.dateStr && setSelectedDate(c.dateStr)}
+                                      aria-pressed={selected}
+                                      className={`inline-flex items-center justify-center w-12 h-12 sm:w-14 sm:h-14 rounded-full border ${c.day ? (selected? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-900 border-slate-200 hover:bg-slate-50') : 'opacity-0 pointer-events-none'}`}
+                                    >
+                                      {c.day ? <span className="text-sm sm:text-base font-medium">{c.day}</span> : null}
+                                    </button>
+                                  )
+                                })}
+                              </div>
+                            </div>
                           </div>
                         )
                       })()}
@@ -630,40 +669,77 @@ export default function Snapshot() {
                   </div>
                   <div>
                     <div className="text-sm text-slate-600 mb-1">Time</div>
-                    <div className="h-40 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-2">
-                      <div className="grid grid-cols-4 gap-2">
-                        {timeOptions.map(opt => {
-                          const selected = selectedTime===opt.value
-                          return (
-                            <button
-                              key={opt.value}
-                              type="button"
-                              onClick={()=>setSelectedTime(opt.value)}
-                              aria-pressed={selected}
-                              className={`inline-flex items-center justify-center w-16 h-16 rounded-full border ${selected? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-900 border-slate-200 hover:bg-slate-50'}`}
-                            >
-                              <span className="text-xs font-medium whitespace-nowrap">{opt.label}</span>
-                            </button>
-                          )
-                        })}
-                      </div>
+                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                      <WheelDateTime
+                        value={selectedDate && selectedTime ? new Date(`${selectedDate}T${selectedTime}`) : undefined}
+                        onChange={(d) => {
+                          const yyyy = d.getFullYear()
+                          const mm = String(d.getMonth() + 1).padStart(2, '0')
+                          const dd = String(d.getDate()).padStart(2, '0')
+                          const hh = String(d.getHours()).padStart(2, '0')
+                          const mi = String(d.getMinutes()).padStart(2, '0')
+                          setSelectedDate(`${yyyy}-${mm}-${dd}`)
+                          setSelectedTime(`${hh}:${mi}`)
+                        }}
+                        days={30}
+                        minuteStep={15}
+                      />
                     </div>
                   </div>
                   <div className="flex flex-col gap-2 justify-end">
-                    <button type="button" className="rounded-xl bg-emerald-600 text-white px-4 py-2 disabled:opacity-50" disabled={!emailDraft || !scheduleAt || !selectedClientId || emailBusy || !(client as any)?.email}
-                      onClick={async()=>{
-                        try {
-                          setEmailBusy(true)
-                          const to = (client as any)?.email ? [ (client as any)?.email ] : []
-                          const res = await fetch('/api/email/schedule', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ client_id: selectedClientId, to_recipients: to, subject: 'Quick follow-up', body_text: emailDraft, send_at: new Date(scheduleAt).toISOString() }) })
-                          const j = await res.json()
-                          if (!res.ok) throw new Error(j?.error || 'Failed to schedule')
-                          pushToast({ type:'success', message: 'Email scheduled' })
-                          setEmailOpen(false)
-                        } catch(e:any) { pushToast({ type:'error', message: e?.message || 'Failed to schedule' }) }
-                        finally { setEmailBusy(false) }
-                      }}
-                    >Schedule</button>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        className="rounded-xl bg-emerald-600 text-white px-4 py-2 disabled:opacity-50"
+                        disabled={!emailDraft || !selectedClientId || emailBusy || !(client as any)?.email}
+                        onClick={async() => {
+                          try {
+                            setEmailBusy(true)
+                            const toSingle = (client as any)?.email || ''
+                            const res = await fetch('/api/email/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider: 'mock', to: toSingle, subject: 'Quick follow-up', body: emailDraft }) })
+                            const j = await res.json()
+                            if (!res.ok) throw new Error(j?.error || 'Failed to send')
+                            pushToast({ type: 'success', message: 'Email sent' })
+                            setEmailOpen(false)
+                          } catch (e:any) {
+                            pushToast({ type: 'error', message: e?.message || 'Failed to send' })
+                          } finally { setEmailBusy(false) }
+                        }}
+                      >Send now</button>
+
+                      <button
+                        type="button"
+                        className="rounded-xl border border-slate-200 px-4 py-2 disabled:opacity-50"
+                        disabled={!emailDraft || !scheduleAt || !selectedClientId || emailBusy || !(client as any)?.email}
+                        onClick={async() => {
+                          try {
+                            setEmailBusy(true)
+                            const to = (client as any)?.email ? [ (client as any)?.email ] : []
+                            const res = await fetch('/api/email/schedule', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ client_id: selectedClientId, to_recipients: to, subject: 'Quick follow-up', body_text: emailDraft, send_at: new Date(scheduleAt).toISOString() }) })
+                            const j = await res.json()
+                            if (!res.ok) throw new Error(j?.error || 'Failed to schedule')
+                            pushToast({ type:'success', message: 'Email scheduled' })
+                            // Persist a lightweight reminder so it appears in Snapshot scheduled list
+                            try {
+                              await upsert.mutateAsync({
+                                client_id: selectedClientId,
+                                kind: 'deadline',
+                                title: `Scheduled: Quick follow-up (email)`,
+                                status: 'scheduled',
+                                date: new Date(scheduleAt).toISOString(),
+                                tags: Array.from(new Set([...(client as any)?.email ? ['scheduled_email'] : [] , 'reminder'])),
+                                source: 'user_note'
+                              } as any)
+                              pushToast({ type: 'success', message: 'Saved scheduled reminder to dashboard', subtle: true })
+                            } catch (err:any) {
+                              pushToast({ type:'error', message: err?.message || 'Scheduled but failed to save reminder' })
+                            }
+                            setEmailOpen(false)
+                          } catch(e:any) { pushToast({ type:'error', message: e?.message || 'Failed to schedule' }) }
+                          finally { setEmailBusy(false) }
+                        }}
+                      >Send later</button>
+                    </div>
                     {!(client as any)?.email && (
                       <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">No client email on file</div>
                     )}

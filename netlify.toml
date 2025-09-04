@@ -1,0 +1,50 @@
+[build]
+  publish = "out"
+  command = "npm run build"
+
+[build.environment]
+  NETLIFY = "true"
+  NODE_VERSION = "18"
+
+# Redirect all requests to index.html for SPA behavior
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+  conditions = {Role = ["admin", "editor"], Country = ["US"]}
+
+# Serve static assets directly
+[[redirects]]
+  from = "/kairodex.html"
+  to = "/kairodex.html"
+  status = 200
+
+[[redirects]]
+  from = "/kairodex.css"
+  to = "/kairodex.css"
+  status = 200
+
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/:splat"
+  status = 200
+
+# Headers for security
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-XSS-Protection = "1; mode=block"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+
+# Cache static assets
+[[headers]]
+  for = "/_next/static/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/static/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"

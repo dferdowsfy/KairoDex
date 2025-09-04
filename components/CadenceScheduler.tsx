@@ -77,19 +77,37 @@ export default function CadenceScheduler({
 
   useEffect(() => { onChange(selected) }, [selected, onChange])
 
+  // If parent provides new initial startDate/time, sync internal state
+  useEffect(() => {
+    if (initial?.startDate && initial.startDate !== startDate) setStartDate(initial.startDate)
+    if (initial?.time && initial.time !== time) setTime(initial.time)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initial?.startDate, initial?.time])
+
   return (
-    <div className="space-y-3">
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+    <div className="space-y-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div>
-          <div className="text-sm text-slate-600 mb-1">Cadence</div>
-          <select value={cadence} onChange={e=>setCadence(e.target.value as Cadence)} className="h-10 w-full input-neon px-3 text-sm">
-            <option value="weekly">Weekly</option>
-            <option value="biweekly">Every 2 weeks</option>
-            <option value="monthly">Monthly</option>
-            <option value="every_other_month">Every other month</option>
-            <option value="quarterly">Quarterly</option>
-            <option value="custom">Custom…</option>
-          </select>
+          <div className="text-sm text-slate-600 mb-2">Cadence</div>
+          <div className="flex gap-2 flex-wrap">
+            {[
+              { key: 'weekly', label: 'Weekly' },
+              { key: 'biweekly', label: 'Every 2 weeks' },
+              { key: 'monthly', label: 'Monthly' },
+              { key: 'every_other_month', label: 'Every other month' },
+              { key: 'quarterly', label: 'Quarterly' },
+              { key: 'custom', label: 'Custom…' },
+            ].map(opt => (
+              <button
+                key={opt.key}
+                type="button"
+                aria-pressed={cadence === (opt.key as Cadence)}
+                onClick={() => setCadence(opt.key as Cadence)}
+                className={`px-3 py-2 rounded-lg text-sm border transition-colors ${cadence === (opt.key as Cadence) ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-900 border-slate-200 hover:border-slate-300'}`}>
+                {opt.label}
+              </button>
+            ))}
+          </div>
         </div>
         <div>
           <div className="text-sm text-slate-600 mb-1">Start date</div>
@@ -103,11 +121,11 @@ export default function CadenceScheduler({
 
       {['weekly','biweekly'].includes(cadence) && (
         <div>
-          <div className="text-sm text-slate-600 mb-1">Day of week</div>
-          <div className="flex flex-wrap gap-2">
+          <div className="text-sm text-slate-600 mb-2">Day of week</div>
+          <div className="flex flex-wrap gap-3">
             {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map((d, i) => (
               <button key={i} type="button" onClick={()=>setWeekday(i)}
-                className={`px-3 py-1 rounded-full border ${weekday===i?'bg-slate-900 text-white border-slate-900':'bg-white text-slate-900 border-slate-200'}`}>{d}</button>
+                className={`px-4 py-2 rounded-full border text-sm transition-colors ${weekday===i?'bg-slate-900 text-white border-slate-900':'bg-white text-slate-900 border-slate-200 hover:border-slate-300'}`}>{d}</button>
             ))}
           </div>
         </div>
@@ -142,25 +160,26 @@ export default function CadenceScheduler({
         </div>
       )}
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-end">
         <div>
-          <div className="text-sm text-slate-600 mb-1">Occurrences</div>
-          <input type="number" min={1} max={36} value={count} onChange={e=>setCount(Number(e.target.value))} className="h-10 w-full input-neon px-3 text-sm" />
+          <div className="text-sm text-slate-600 mb-2">Occurrences</div>
+          <input type="number" min={1} max={36} value={count} onChange={e=>setCount(Number(e.target.value))} className="h-12 w-full input-neon px-3 text-sm" />
         </div>
-        <div className="sm:col-span-2 text-xs text-slate-500">Preview first {Math.min(maxPreview, count)} occurrences; uncheck to exclude specific dates.</div>
+        <div className="sm:col-span-2 text-sm text-slate-500">Preview first {Math.min(maxPreview, count)} occurrences — uncheck any to exclude specific dates from the series.</div>
       </div>
 
-      <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 max-h-48 overflow-y-auto">
+      <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 max-h-56 overflow-y-auto">
         {preview.length === 0 && <div className="text-sm text-slate-500">No dates</div>}
-        <ul className="space-y-2">
+        <ul className="space-y-3">
           {preview.map((d, i) => {
             const id = `cad-${i}`
             const label = d.toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
             const excluded = !!exclusions[i]
             return (
-              <li key={i} className="flex items-center gap-2">
-                <input id={id} type="checkbox" checked={!excluded} onChange={(e)=>setExclusions(prev=>({ ...prev, [i]: !e.target.checked }))} />
+              <li key={i} className="flex items-center gap-3">
+                <input id={id} type="checkbox" checked={!excluded} onChange={(e)=>setExclusions(prev=>({ ...prev, [i]: !e.target.checked }))} className="h-5 w-5 rounded-sm border-slate-300" />
                 <label htmlFor={id} className={`text-sm ${excluded?'line-through text-slate-400':'text-slate-900'}`}>{label}</label>
+                <div className="ml-auto text-xs text-slate-400">{i+1}</div>
               </li>
             )
           })}

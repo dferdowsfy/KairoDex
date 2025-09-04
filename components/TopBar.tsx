@@ -18,6 +18,9 @@ export function ClientsTopBar() {
   const { selectedClientId, setSelectedClientId } = useUI()
   const { user } = useSessionUser()
   const activeClient = clients.find(c => c.id === (activeClientId || selectedClientId))
+  // Show the pricing CTA only for non-authenticated users (public/marketing pages)
+  // Never show pricing for authenticated users, regardless of the page they're on
+  const showPricing = !user
   const isActive = (href: string) => href === '/' ? pathname === '/' : (pathname?.startsWith(href) ?? false)
 
   // Close the dropdown on route changes
@@ -41,7 +44,7 @@ export function ClientsTopBar() {
               {activeClient ? activeClient.name : 'Clients'} <ChevronDown className="h-5 w-5"/>
             </button>
             {open && (
-              <div className="absolute right-0 mt-2 w-64 bg-surface border border-default rounded-md shadow-lg p-1 text-ink z-50">
+              <div className="absolute right-0 mt-2 w-72 max-h-72 overflow-auto bg-surface border border-default rounded-md shadow-lg p-1 text-ink z-50 visible-scrollbar">
                 {clients.length ? (
                   <>
                     {clients.map(c => (
@@ -56,6 +59,7 @@ export function ClientsTopBar() {
                       </button>
                     ))}
                     <div className="h-px bg-slate-200 my-1"/>
+                    <a href="/clients/list" className="block px-3 py-2 text-sm rounded hover:bg-surface-2 text-ink no-underline">View clients list</a>
                     <button onClick={() => { setSelectedClientId(null); setOpen(false) }} className="w-full text-left px-3 py-2 text-sm rounded hover:bg-surface-2 text-muted">Clear selection</button>
                   </>
                 ) : (
@@ -75,6 +79,13 @@ export function ClientsTopBar() {
               </div>
             </details>
           </div>
+          {/* Pricing link (visible only on public pages / when not authenticated) */}
+          {showPricing && (
+            <a href="/kairodex.html" className="ml-2 inline-flex items-center rounded-xl bg-orange-500 text-white px-4 py-2 text-sm font-semibold hover:bg-orange-600 shadow-sm no-underline">
+              Pricing
+            </a>
+          )}
+
           {user ? (
             <button
               onClick={async()=>{ try{ await supabase.auth.signOut(); window.location.href = '/kairodex.html' } catch{ window.location.href = '/kairodex.html' } }}

@@ -39,8 +39,10 @@ export async function GET(req: NextRequest) {
     const clientId = req.nextUrl.searchParams.get('clientId') || ''
     if (!clientId) return new Response(JSON.stringify({ error: 'clientId required' }), { status: 400 })
     const supabase = supabaseServer()
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user?.id) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 })
+  const getUserRes = await supabase.auth.getUser()
+  const user = getUserRes?.data?.user
+  if (getUserRes?.error) throw getUserRes.error
+  if (!user?.id) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 })
     const row = await getRow(clientId)
     const history = parseHistory(row?.Notes_Inputted)
     return new Response(JSON.stringify({ items: history }), { status: 200, headers: { 'Content-Type': 'application/json' } })
@@ -53,9 +55,11 @@ export async function POST(req: NextRequest) {
   try {
     const { clientId, text } = await req.json()
     if (!clientId || !text) return new Response(JSON.stringify({ error: 'clientId and text required' }), { status: 400 })
-    const supabase = supabaseServer()
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user?.id) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 })
+  const supabase = supabaseServer()
+  const getUserRes = await supabase.auth.getUser()
+  const user = getUserRes?.data?.user
+  if (getUserRes?.error) throw getUserRes.error
+  if (!user?.id) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 })
     const row = await getRow(clientId)
     const history = parseHistory(row?.Notes_Inputted)
     const entry: Entry = { id: `ni_${Date.now()}`, text, user_id: user.id, created_at: new Date().toISOString() }
@@ -73,9 +77,11 @@ export async function DELETE(req: NextRequest) {
     const clientId = searchParams.get('clientId') || ''
     const id = searchParams.get('id') || ''
     if (!clientId || !id) return new Response(JSON.stringify({ error: 'clientId and id required' }), { status: 400 })
-    const supabase = supabaseServer()
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user?.id) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 })
+  const supabase = supabaseServer()
+  const getUserRes = await supabase.auth.getUser()
+  const user = getUserRes?.data?.user
+  if (getUserRes?.error) throw getUserRes.error
+  if (!user?.id) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 })
     const row = await getRow(clientId)
     const history = parseHistory(row?.Notes_Inputted)
     const next = history.filter(e => e.id !== id)

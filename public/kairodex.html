@@ -8,6 +8,24 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/kairodex.css" />
+  <style>
+    /* Pricing section styles (small, intentionally scoped) */
+    .pricing { background: #f9f9f7; padding: 4rem 0; }
+    .pricing h2 { font-size: 2.25rem; margin: 0 0 0.5rem; color: #0f172a; font-weight:700; }
+    .pricing p.lead { color: #6b7280; margin-bottom: 1.75rem; }
+    .pricing-grid { display: grid; gap: 1.25rem; grid-template-columns: 1fr; }
+    @media(min-width:768px){ .pricing-grid { grid-template-columns: repeat(2,1fr); max-width:800px; margin:0 auto; } }
+    .plan { background: #fff; border-radius: 1rem; padding: 1.5rem; box-shadow: 0 6px 18px rgba(15,23,42,0.06); border: 1px solid rgba(15,23,42,0.04); display:flex; flex-direction:column }
+    .plan.pro { border: 2px solid #fb923c; box-shadow: 0 10px 30px rgba(15,23,42,0.09); transform: translateY(-4px); }
+    .price { font-size:1.75rem; font-weight:700; color:#0f172a }
+    .subtitle { color:#6b7280; font-size:0.95rem }
+    .features { margin-top:1rem; margin-bottom:1.25rem; flex:1 }
+    .features li { margin:0.5rem 0; color:#374151; list-style:none; display:flex; gap:0.5rem; align-items:flex-start }
+    .features li svg { flex-shrink:0; margin-top:3px }
+    .btn-cta { display:inline-block; background:#f97316; color:#fff; padding:0.6rem 1rem; border-radius:0.75rem; text-decoration:none; font-weight:600 }
+    .btn-ghost-orange { border:1px solid #f97316; color:#f97316; background:transparent; padding:0.5rem 0.9rem; border-radius:0.6rem; text-decoration:none }
+    .enterprise-note { text-align:center; margin-top:1.25rem; color:#374151 }
+  </style>
   <meta name="description" content="Right time. Right opportunity. Simplified for agents." />
   <meta name="robots" content="noindex,follow">
 </head>
@@ -40,6 +58,7 @@
         <span class="logo-title">KairoDex</span>
       </a>
       <nav class="actions">
+        <a class="btn btn-ghost" href="#pricing">Pricing</a>
         <a class="btn btn-ghost" href="/login">Login</a>
         <a class="btn btn-primary" href="/signup">Sign Up</a>
       </nav>
@@ -114,6 +133,58 @@
             </details>
           </article>
         </div>
+      </div>
+    </section>
+
+    <section class="pricing" id="pricing" aria-labelledby="pricing-heading">
+      <div class="container">
+        <div style="text-align:center; max-width:720px; margin:0 auto 1.5rem;">
+          <h2 id="pricing-heading">Simple, Transparent Pricing</h2>
+          <p class="lead">Pick a plan that grows with your team — no hidden fees. Upgrade or add seats anytime.</p>
+        </div>
+
+        <div class="pricing-grid">
+          <article class="plan pro">
+            <div>
+              <span style="display:inline-block;padding:6px 10px;background:#fff4e6;color:#c2410c;border-radius:999px;font-weight:700;font-size:12px;margin-bottom:10px;">Most Popular</span>
+              <h3 style="margin:0 0 0.25rem;">Professional</h3>
+              <div class="price">$100 <span class="subtitle">/ per user / month</span></div>
+              <p style="color:#6b7280;font-size:14px;margin:8px 0 16px;">Perfect for growing real estate teams</p>
+            </div>
+            <ul class="features">
+              <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f97316" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>Unlimited Follow-Ups (Email, SMS, Voice)</li>
+              <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f97316" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>Smart Lead Scoring & Prioritization</li>
+              <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f97316" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>Contract Parsing & DocuSign Updates</li>
+              <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f97316" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>AI Knowledge-Based Follow-Ups</li>
+              <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f97316" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>Advanced Dashboard & Analytics</li>
+              <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f97316" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>Team Collaboration Tools</li>
+              <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f97316" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>Integration Hub (CRM, MLS)</li>
+              <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f97316" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>Priority Support</li>
+            </ul>
+            <div style="text-align:left; margin-top:8px"><a class="btn-cta" href="/signup">Get Started</a></div>
+          </article>
+
+          <article class="plan">
+            <div>
+              <h3 style="margin:0 0 0.25rem;">Enterprise</h3>
+              <div class="price">Custom <span class="subtitle">pricing</span></div>
+              <p style="color:#6b7280;font-size:14px;margin:8px 0 16px;">For large brokerages and teams</p>
+            </div>
+            <ul class="features">
+              <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f97316" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>Everything in Professional</li>
+              <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f97316" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>White-Label Solutions</li>
+              <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f97316" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>Custom Integrations & API Access</li>
+              <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f97316" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>Advanced Security & Compliance</li>
+              <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f97316" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>Dedicated Account Manager</li>
+              <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f97316" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>Multi-Location Management</li>
+              <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f97316" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>Custom Training & Onboarding</li>
+              <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f97316" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>24/7 Phone Support</li>
+            </ul>
+            <div style="text-align:left; margin-top:8px"><a class="btn-cta" href="/contact-sales">Contact Sales</a></div>
+          </article>
+        </div>
+
+        <p class="enterprise-note">Start with a 14-day free trial. No credit card required. <a href="/signup" style="color:#f97316;text-decoration:underline;">Get Started →</a></p>
       </div>
     </section>
   </main>

@@ -41,6 +41,19 @@ const config = {
         hostname: 'images.unsplash.com'
       }
     ]
+  },
+  // For Netlify deployment
+  trailingSlash: true,
+  // Enable static export for better Netlify compatibility
+  output: process.env.NETLIFY ? 'export' : undefined,
+  // Disable image optimization for static export
+  images: process.env.NETLIFY ? { unoptimized: true } : {
+    remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: 'images.unsplash.com'
+      }
+    ]
   }
 };
 

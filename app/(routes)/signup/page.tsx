@@ -12,6 +12,7 @@ export default function SignupPage() {
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
+  const [isError, setIsError] = useState(false)
   const [heroSrc, setHeroSrc] = useState('/img/signup-hero.jpg')
   const router = useRouter()
 
@@ -19,17 +20,21 @@ export default function SignupPage() {
     e.preventDefault()
     setLoading(true)
     setMessage(null)
+    setIsError(false)
     try {
       const resp = await fetch('/api/auth/signup', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email, password }) })
       const j = await resp.json()
       if (!resp.ok) {
         const detail = j.issues ? `\n- ${j.issues.join('\n- ')}` : ''
         setMessage((j.error || 'Failed to sign up.') + detail)
+        setIsError(true)
         return
       }
       setMessage('Check your email to confirm your account. You can log in after confirming.')
+      setIsError(false)
     } catch (e: any) {
       setMessage(e?.message || 'Auth not configured in this environment.')
+      setIsError(true)
     } finally { setLoading(false) }
   }
 
@@ -57,10 +62,10 @@ export default function SignupPage() {
           <p className="text-sm text-slate-600 mb-6">Use email/password to sign up.</p>
           <form onSubmit={signUp} className="space-y-3 text-left">
             <input type="email" required className="w-full h-11 input-neon px-3 text-base" placeholder="Email" value={email} onChange={(e)=>setEmail(e.target.value)} />
-            <input type="password" required minLength={12} className="w-full h-11 input-neon px-3 text-base" placeholder="Password (min 12, upper/lower/number/symbol)" value={password} onChange={(e)=>setPassword(e.target.value)} />
+            <input type="password" required minLength={8} className="w-full h-11 input-neon px-3 text-base" placeholder="Password (min 8 characters)" value={password} onChange={(e)=>setPassword(e.target.value)} />
             <button type="submit" disabled={loading} className="w-full btn-neon">{loading ? 'Creating…' : 'Create account'}</button>
           </form>
-          {message && <p className="text-sm mt-3 text-slate-600">{message}</p>}
+          {message && <p className={`text-sm mt-3 ${isError ? 'text-red-600' : 'text-green-600'}`}>{message}</p>}
           <p className="text-xs text-slate-500 mt-4">Already have an account? <Link href="/login" className="underline">Log in</Link></p>
         </div>
       </div>
