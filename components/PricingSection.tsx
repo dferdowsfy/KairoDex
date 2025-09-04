@@ -68,7 +68,9 @@ export default function PricingSection() {
     if (plan.id === 'free') {
       window.location.href = '/signup?plan=free';
     } else if (plan.id === 'professional') {
-      window.location.href = '/pricing/checkout?plan=professional';
+      // For now, redirect to signup with plan info
+      // In production, this would redirect to Stripe Checkout
+      window.location.href = '/signup?plan=professional';
     } else if (plan.id === 'enterprise') {
       window.location.href = '/contact-sales';
     }
