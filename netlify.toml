@@ -1,29 +1,11 @@
 [build]
-  publish = "out"
   command = "npm run build"
 
 [build.environment]
   NETLIFY = "true"
-  NODE_VERSION = "20"
+  NODE_VERSION = "20.9.0"
 
-# Redirect all requests to index.html for SPA behavior
-[[redirects]]
-  from = "/*"
-  to = "/index.html"
-  status = 200
-  conditions = {Role = ["admin", "editor"], Country = ["US"]}
-
-# Serve static assets directly
-[[redirects]]
-  from = "/kairodex.html"
-  to = "/kairodex.html"
-  status = 200
-
-[[redirects]]
-  from = "/kairodex.css"
-  to = "/kairodex.css"
-  status = 200
-
+# If you use Netlify Functions for custom APIs, keep the api redirect.
 [[redirects]]
   from = "/api/*"
   to = "/.netlify/functions/:splat"
