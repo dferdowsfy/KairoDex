@@ -1,7 +1,6 @@
-import { NextRequest } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { supabaseServer } from '@/lib/supabaseServer'
-
-export const dynamic = 'force-dynamic'
+import { createServerClient } from '@supabase/ssr'
 
 function extractFromUnstructured(text: string) {
   // Heuristics: split lines, first non-empty line as name, find email and phone, rest as notes
@@ -37,7 +36,7 @@ function normalizeDnc(val: any) {
   return /^(true|1|yes|y|dnc|do\s*not\s*contact|opt\s*out|unsubscribe)$/.test(s)
 }
 
-export async function POST(req: NextRequest) {
+export async function POST(request: NextRequest) {
   try {
     const supabase = supabaseServer()
     const {
@@ -49,9 +48,9 @@ export async function POST(req: NextRequest) {
     
     console.log('[BULK-UPLOAD] Authenticated user:', user.email)
 
-  const body = await req.json()
+  const body = await request.json()
   // If the frontend sets an org_id cookie on sign-in, include it on inserted rows
-  const orgId = (req.cookies?.get && req.cookies.get('org_id')?.value) || undefined
+  const orgId = (request.cookies?.get && request.cookies.get('org_id')?.value) || undefined
     const rows = Array.isArray(body?.rows) ? body.rows as any[] : []
     if (!rows.length) return new Response(JSON.stringify({ error: 'No rows provided' }), { status: 400 })
 
