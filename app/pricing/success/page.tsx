@@ -60,7 +60,7 @@ export default function SuccessPage() {
         </div>
 
         <div className="bg-gray-50 rounded-lg p-4 mb-6">
-          <h3 className="font-semibold text-gray-900 mb-2">What's next?</h3>
+          <h3 className="font-semibold text-gray-900 mb-2">What&apos;s next?</h3>
           <ul className="text-left text-sm text-gray-600 space-y-2">
             <li className="flex items-start">
               <span className="text-orange-500 mr-2">•</span>
