@@ -94,11 +94,20 @@ export async function POST(request: NextRequest) {
       // Don't fail the subscription creation, but log the error
     }
 
+    // Get client secret from payment intent if available
+    let clientSecret = null;
+    if (subscription.latest_invoice && typeof subscription.latest_invoice === 'object') {
+      const invoice = subscription.latest_invoice as any;
+      if (invoice.payment_intent && typeof invoice.payment_intent === 'object') {
+        clientSecret = invoice.payment_intent.client_secret;
+      }
+    }
+
     return NextResponse.json({
       subscriptionId: subscription.id,
       customerId: customer.id,
       status: subscription.status,
-      clientSecret: subscription.latest_invoice?.payment_intent?.client_secret,
+      clientSecret,
     });
 
   } catch (error) {
