@@ -5,6 +5,10 @@
   NETLIFY = "true"
   NODE_VERSION = "20.9.0"
 
+# Override dashboard settings and ensure Next.js plugin controls publish directory
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
+
 # If you use Netlify Functions for custom APIs, keep the api redirect.
 [[redirects]]
   from = "/api/*"
