@@ -1,7 +1,5 @@
 [build]
   command = "npm run build"
-  # Use the Next.js plugin's output directory for SSR builds
-  publish = ".netlify/next"
 
 [build.environment]
   NETLIFY = "true"
