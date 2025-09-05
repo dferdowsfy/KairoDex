@@ -1,36 +1,12 @@
 [build]
   command = "npm run build"
+  publish = ".next"
 
-[build.environment]
-  NETLIFY = "true"
-  NODE_VERSION = "20.9.0"
+[functions]
+  node_bundler = "esbuild"
 
-# Override dashboard settings and ensure Next.js plugin controls publish directory
 [[plugins]]
   package = "@netlify/plugin-nextjs"
 
-# If you use Netlify Functions for custom APIs, keep the api redirect.
-[[redirects]]
-  from = "/api/*"
-  to = "/.netlify/functions/:splat"
-  status = 200
-
-# Headers for security
-[[headers]]
-  for = "/*"
-  [headers.values]
-    X-Frame-Options = "DENY"
-    X-XSS-Protection = "1; mode=block"
-    X-Content-Type-Options = "nosniff"
-    Referrer-Policy = "strict-origin-when-cross-origin"
-
-# Cache static assets
-[[headers]]
-  for = "/_next/static/*"
-  [headers.values]
-    Cache-Control = "public, max-age=31536000, immutable"
-
-[[headers]]
-  for = "/static/*"
-  [headers.values]
-    Cache-Control = "public, max-age=31536000, immutable"
+[build.environment]
+  NODE_VERSION = "20"

@@ -25,6 +25,6 @@ export default function Logo({ className = 'h-10 w-auto' }: { className?: string
           <text x="48" y="27" fontSize="18" fontWeight="800" fontFamily="Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" fill="#0F172A" letterSpacing=".2">KairoDex</text>
         </svg>
       </span>
-    </Link>
+    </a>
   )
 }

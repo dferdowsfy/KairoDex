@@ -54,6 +54,18 @@ Use the provided tasks (Terminal > Run Task...):
 - `public/manifest.json` is set. Use the Install hint or browser menu to install.
  - In development, PWA is disabled; build for production to enable service worker.
 
+## Netlify troubleshooting (short)
+
+If you deploy to Netlify and hit build problems, try these quick steps in order:
+
+- Clear the build cache and re-deploy: Site → Deploys → Trigger deploy → Clear cache and deploy site. This often fixes stale artifact or dependency issues.
+- Check plugin conflicts: ensure only the official `@netlify/plugin-nextjs` is enabled for this site (netlify.toml already references it). Temporarily disable other Netlify plugins and re-run to isolate conflicts.
+- Verify required environment variables are set in Site settings → Build & deploy → Environment. Missing server-side secrets (for example SUPABASE_SERVICE_ROLE_KEY, STRIPE_SECRET_KEY, JWT_SECRET) commonly cause build-time or runtime failures.
+- Match Node version: Netlify should use Node 20.x for this project. `netlify.toml` sets NODE_VERSION=20; double-check Site environment or the Netlify UI runtime settings if builds report incompatible Node versions.
+- If the build fails with memory errors, try building locally with increased memory: set `NODE_OPTIONS=--max_old_space_size=4096` and run `npm run build` to confirm.
+
+If these steps don't help, paste the first failing error from the Netlify build log into an issue or support ticket — the first error is usually the root cause.
+
 ## Supabase schema (seed)
 
 Run in Supabase SQL editor:
@@ -148,6 +160,20 @@ npm run test
 - If Supabase isn’t configured, the app falls back to mock data.
  - If live market answers look generic, ensure OPENROUTER_API_KEY is present; the chatbot uses Perplexity via OpenRouter to fetch current city trends and returns citations.
 - For iOS standalone PWA safe‑area spacing, keep the bottom nav enabled.
+
+### Netlify build & deployment tips
+
+- Clearing the Netlify build cache often fixes strange build failures. In Netlify, go to Deploys → Trigger deploy → Clear cache and deploy site.
+- Plugin conflicts: ensure `@netlify/plugin-nextjs` is installed in your Netlify site plugins (netlify.toml includes it). If you previously added other Next plugins, try disabling them temporarily.
+- Missing env vars: build-time errors usually mean a required server env is missing (e.g. SUPABASE_SERVICE_ROLE_KEY, STRIPE_SECRET_KEY). Add required secrets in Site settings → Build & deploy → Environment.
+- Node version: Netlify Node runtime should match Next.js requirements. This repo sets NODE_VERSION=20 in `netlify.toml`; in Netlify ensure the environment uses Node 20.x.
+
+If a build fails, check the full build log for the first error, then:
+1. Confirm required environment variables are set in Netlify (see NETLIFY_ENV_VARS.md).
+2. Try clearing the build cache and re-deploy.
+3. Temporarily disable non-official Netlify plugins and re-run.
+4. Run `npm run build` locally with NODE_OPTIONS=--max_old_space_size=4096 if memory issues occur.
+
 
 ## Notes
 - Replace logo.svg with your brand asset later.

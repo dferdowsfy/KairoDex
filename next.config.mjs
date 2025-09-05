@@ -26,8 +26,7 @@ const withPWA = nextPWA({
   cacheOnFrontEndNav: true,
   disable: process.env.NODE_ENV === 'development',
   runtimeCaching: [...runtimeCaching, ...extraCaching],
-  // In App Router-only projects, avoid injecting legacy pages assets like /_error
-  buildExcludes: [/^.*$/], // let Next handle assets; keep our own runtimeCaching
+  // Keep default build behavior; avoid aggressive buildExcludes which can break asset handling
 });
 
 /** @type {import('next').NextConfig} */
@@ -40,7 +39,10 @@ const config = {
         protocol: 'https',
         hostname: 'images.unsplash.com'
       }
-    ]
+    ],
+    // On Netlify, the Next image optimization may not run the same way as Vercel.
+    // Disable the built-in optimizer if you prefer to serve images statically or via a proxy.
+    unoptimized: true
   },
   // For Netlify deployment
   trailingSlash: true,
@@ -52,4 +54,5 @@ const config = {
   },
 };
 
+// Export the Next.js config wrapped with the PWA plugin.
 export default withPWA(config);

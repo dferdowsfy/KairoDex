@@ -2,40 +2,40 @@ import { NextRequest, NextResponse } from 'next/server';
 import Stripe from 'stripe';
 import { createClient } from '@supabase/supabase-js';
 
-// Initialize Stripe
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: '2025-08-27.basil',
-});
+function getStripeClient() {
+  const key = process.env.STRIPE_SECRET_KEY;
+  if (!key) throw new Error('Missing STRIPE_SECRET_KEY env var');
+  return new Stripe(key, { apiVersion: '2025-08-27.basil' });
+}
 
-// Initialize Supabase Admin Client
-const supabaseAdmin = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false
-    }
-  }
-);
+function getSupabaseAdmin() {
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE || process.env.SUPABASE_SERVICE_KEY;
+  if (!url || !key) throw new Error('Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY env vars');
+  return createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } });
+}
 
-const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET!;
+function getWebhookSecret() {
+  const s = process.env.STRIPE_WEBHOOK_SECRET;
+  if (!s) throw new Error('Missing STRIPE_WEBHOOK_SECRET env var');
+  return s;
+}
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.text();
-    const signature = request.headers.get('stripe-signature')!;
+    const signature = request.headers.get('stripe-signature');
+    if (!signature) return NextResponse.json({ error: 'Missing stripe-signature header' }, { status: 400 });
 
+    const stripe = getStripeClient();
+    const webhookSecret = getWebhookSecret();
     let event: Stripe.Event;
 
     try {
       event = stripe.webhooks.constructEvent(body, signature, webhookSecret);
     } catch (err) {
       console.error('Webhook signature verification failed:', err);
-      return NextResponse.json(
-        { error: 'Invalid signature' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'Invalid signature' }, { status: 400 });
     }
 
     // Handle the event
@@ -81,6 +81,7 @@ async function handleSubscriptionUpdate(subscription: Stripe.Subscription) {
     return;
   }
 
+  const supabaseAdmin = getSupabaseAdmin();
   const { error } = await supabaseAdmin
     .from('AgentHub_DB')
     .update({
@@ -106,6 +107,7 @@ async function handleSubscriptionCancelled(subscription: Stripe.Subscription) {
     return;
   }
 
+  const supabaseAdmin = getSupabaseAdmin();
   const { error } = await supabaseAdmin
     .from('AgentHub_DB')
     .update({
@@ -122,7 +124,7 @@ async function handleSubscriptionCancelled(subscription: Stripe.Subscription) {
 
 async function handlePaymentSucceeded(invoice: Stripe.Invoice) {
   if (!(invoice as any).subscription) return;
-  
+  const stripe = getStripeClient();
   const subscription = await stripe.subscriptions.retrieve((invoice as any).subscription as string);
   const userId = subscription.metadata.userId;
 
@@ -131,6 +133,7 @@ async function handlePaymentSucceeded(invoice: Stripe.Invoice) {
     return;
   }
 
+  const supabaseAdmin = getSupabaseAdmin();
   const { error } = await supabaseAdmin
     .from('AgentHub_DB')
     .update({
@@ -146,7 +149,7 @@ async function handlePaymentSucceeded(invoice: Stripe.Invoice) {
 
 async function handlePaymentFailed(invoice: Stripe.Invoice) {
   if (!(invoice as any).subscription) return;
-  
+  const stripe = getStripeClient();
   const subscription = await stripe.subscriptions.retrieve((invoice as any).subscription as string);
   const userId = subscription.metadata.userId;
 
@@ -155,6 +158,7 @@ async function handlePaymentFailed(invoice: Stripe.Invoice) {
     return;
   }
 
+  const supabaseAdmin = getSupabaseAdmin();
   const { error } = await supabaseAdmin
     .from('AgentHub_DB')
     .update({

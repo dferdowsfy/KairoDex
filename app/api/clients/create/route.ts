@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseServer } from '@/lib/supabaseServer'
-import { uploadFileToSupabase } from '@/lib/supabase-file-upload'
+// uploadFileToSupabase helper not present in repo; remove import to avoid build/type errors
 
 export async function POST(req: NextRequest) {
   try {

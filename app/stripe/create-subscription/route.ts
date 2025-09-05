@@ -2,22 +2,20 @@ import { NextRequest, NextResponse } from 'next/server';
 import Stripe from 'stripe';
 import { createClient } from '@supabase/supabase-js';
 
-// Initialize Stripe
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: '2025-08-27.basil',
-});
+// Lazy initializer helpers — this prevents Next's build/data collection step from
+// trying to construct these SDK clients when sensitive env vars are not present.
+function getStripeClient() {
+  const key = process.env.STRIPE_SECRET_KEY;
+  if (!key) throw new Error('Missing STRIPE_SECRET_KEY env var');
+  return new Stripe(key, { apiVersion: '2025-08-27.basil' });
+}
 
-// Initialize Supabase Admin Client
-const supabaseAdmin = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false
-    }
-  }
-);
+function getSupabaseAdmin() {
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE || process.env.SUPABASE_SERVICE_KEY;
+  if (!url || !key) throw new Error('Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY env vars');
+  return createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } });
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -29,6 +27,10 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+
+    // Initialize SDKs lazily at request time
+    const stripe = getStripeClient();
+    const supabaseAdmin = getSupabaseAdmin();
 
     // Check if customer already exists
     let customer;
@@ -73,8 +75,8 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // Update user subscription in database
-    const { error: dbError } = await supabaseAdmin
+  // Update user subscription in database
+  const { error: dbError } = await supabaseAdmin
       .from('AgentHub_DB')
       .update({
         subscription_tier: plan,
