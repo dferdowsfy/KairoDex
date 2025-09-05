@@ -28,6 +28,14 @@ export function middleware(req: NextRequest) {
     return res
   }
 
+  // If the request is to the root path and the user is not authenticated (no ah_last / ah_birth cookies),
+  // send them to the external landing page so unauthenticated users always see the marketing site.
+  const hasSession = !!(req.cookies.get('ah_last')?.value || req.cookies.get('ah_birth')?.value)
+  if (path === '/' && !hasSession) {
+    // External absolute redirect to the marketing domain (domain-only) so the full marketing path is hidden.
+    return NextResponse.redirect('https://kairodex.com')
+  }
+
   const now = Date.now()
   const idleMin = Number(process.env.SESSION_IDLE_MIN || 20)
   const absHours = Number(process.env.SESSION_ABS_HOURS || 24)

@@ -3,7 +3,7 @@ import Link from 'next/link'
 
 export default function Logo({ className = 'h-10 w-auto' }: { className?: string }) {
   return (
-    <Link href="/" aria-label="KairoDex home" className="inline-flex items-center gap-2 select-none">
+  <a href="https://kairodex.com" aria-label="KairoDex home" className="inline-flex items-center gap-2 select-none">
       <span className={`block ${className}`} aria-hidden>
         <svg width="160" height="40" viewBox="0 0 160 40" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="KairoDex" className="h-full w-auto">
           <defs>
