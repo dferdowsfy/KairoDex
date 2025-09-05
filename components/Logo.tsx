@@ -1,10 +1,10 @@
 "use client"
-import Link from 'next/link'
+// Link not used; use plain anchor for external logo link
 
 export default function Logo({ className = 'h-10 w-auto' }: { className?: string }) {
   return (
   <a href="https://kairodex.com" aria-label="KairoDex home" className="inline-flex items-center gap-2 select-none">
-      <span className={`block ${className}`} aria-hidden>
+      <span className={`block ${className}`} aria-hidden={true}>
         <svg width="160" height="40" viewBox="0 0 160 40" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="KairoDex" className="h-full w-auto">
           <defs>
             <linearGradient id="kd-grad" x1="0" y1="0" x2="1" y2="1">
