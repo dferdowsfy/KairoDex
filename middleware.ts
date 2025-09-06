@@ -32,8 +32,27 @@ export function middleware(req: NextRequest) {
   // send them to the external landing page so unauthenticated users always see the marketing site.
   const hasSession = !!(req.cookies.get('ah_last')?.value || req.cookies.get('ah_birth')?.value)
   if (path === '/' && !hasSession) {
-    // External absolute redirect to the marketing domain (domain-only) so the full marketing path is hidden.
-    return NextResponse.redirect('https://kairodex.com')
+    // Only redirect unauthenticated root requests to the marketing domain in production
+    // During local development or on localhost we must NOT redirect so the developer can work locally.
+    const host = req.nextUrl.hostname || req.headers.get('host') || ''
+    const isLocalHost = host === 'localhost' || host.startsWith('127.') || host === '::1'
+    const isDev = process.env.NODE_ENV !== 'production'
+    if (!isLocalHost && !isDev) {
+      // External absolute redirect to the marketing domain (domain-only) so the full marketing path is hidden.
+      // Use NEXT_PUBLIC_SITE_URL if provided so the production domain can be configured from env.
+      const marketingDomain = process.env.NEXT_PUBLIC_SITE_URL || 'https://kairodex.com'
+      return NextResponse.redirect(marketingDomain)
+    }
+
+    // In development or when serving localhost, don't redirect — continue with normal handling
+    const res = NextResponse.next()
+    // Minimal security headers for this path as well
+    res.headers.set('Permissions-Policy', 'interest-cohort=()')
+    res.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin')
+    res.headers.set('X-Content-Type-Options', 'nosniff')
+    res.headers.set('X-Frame-Options', 'DENY')
+    res.headers.set('X-XSS-Protection', '0')
+    return res
   }
 
   const now = Date.now()
