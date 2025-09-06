@@ -44,7 +44,7 @@ export function middleware(req: NextRequest) {
       return NextResponse.redirect(marketingDomain)
     }
 
-    // In development or when serving localhost, don't redirect — continue with normal handling
+  // In development or when serving localhost, don't redirect — continue with normal handling
     const res = NextResponse.next()
     // Minimal security headers for this path as well
     res.headers.set('Permissions-Policy', 'interest-cohort=()')
@@ -53,6 +53,25 @@ export function middleware(req: NextRequest) {
     res.headers.set('X-Frame-Options', 'DENY')
     res.headers.set('X-XSS-Protection', '0')
     return res
+  }
+
+  // Canonical host enforcement in production: redirect requests to the canonical
+  // site domain (NEXT_PUBLIC_SITE_URL) so cookies are always set for a single
+  // host (avoids apex vs www mismatches). Skip for localhost / dev.
+  try {
+    const host = req.nextUrl.hostname || req.headers.get('host') || ''
+    const isLocalHost = host === 'localhost' || host.startsWith('127.') || host === '::1'
+    const isDev = process.env.NODE_ENV !== 'production'
+    if (!isLocalHost && !isDev) {
+      const canonical = process.env.NEXT_PUBLIC_SITE_URL || 'https://kairodex.com'
+      const canonicalHost = new URL(canonical).hostname
+      if (host !== canonicalHost) {
+        const target = new URL(req.nextUrl.pathname + req.nextUrl.search, canonical)
+        return NextResponse.redirect(target)
+      }
+    }
+  } catch (err) {
+    // safe-fail: if URL parsing fails, continue without enforcing
   }
 
   const now = Date.now()
