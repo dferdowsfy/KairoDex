@@ -5,7 +5,7 @@ import { aiComplete } from '@/lib/ai'
 import { findSheetRowByHints, sheetRowToClient } from '@/lib/sheets'
 import { supabaseServer } from '@/lib/supabaseServer'
 
-export async function GET(req: NextRequest) {
+export async function handleFollowupGET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url)
     const clientId = searchParams.get('clientId')
@@ -19,7 +19,7 @@ export async function GET(req: NextRequest) {
   }
 }
 
-export async function POST(req: NextRequest) {
+export async function handleFollowupPOST(req: NextRequest) {
   try {
   const { clientId, channel, instruction, save, userId } = await req.json()
     if (!['email', 'sms'].includes(channel)) {
@@ -88,3 +88,7 @@ Grounding:
   return new Response(JSON.stringify({ error: 'Unexpected', details: e?.message }), { status: 500, headers: { 'Content-Type':'application/json' } })
   }
 }
+
+// keep named exports compatible with Next.js route handler API
+export const GET = handleFollowupGET
+export const POST = handleFollowupPOST

@@ -7,7 +7,7 @@ import { getContextBundle } from '@/lib/websearch'
 
 export const dynamic = 'force-dynamic'
 
-export async function POST(req: NextRequest) {
+export async function handleChatPOST(req: NextRequest) {
   try {
   const { clientId, message, intent } = await req.json()
     if (!message) {
@@ -240,3 +240,6 @@ Constraints:
     return new Response(JSON.stringify({ error: e.message || 'Chat failed' }), { status: 500 })
   }
 }
+
+// Keep named export compatible with Next.js route invocation
+export const POST = handleChatPOST
