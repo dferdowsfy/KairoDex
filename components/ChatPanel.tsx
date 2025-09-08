@@ -73,7 +73,7 @@ export default function ChatPanel() {
     try {
   setLoading(true)
   const payload = { clientId: effectiveClientId, message: content }
-  const res = await fetch('/api/ai/chat', {
+  const res = await fetch('/ai/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
@@ -252,7 +252,7 @@ export default function ChatPanel() {
                       setText('')
                       setMessages(m => [...m, { role: 'user', content: s.prompt, intent: s.key }])
                       setLoading(true)
-                      fetch('/api/ai/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ clientId: effectiveClientId, message: s.prompt, intent: s.key === 'follow' ? 'followup' : undefined }) })
+                      fetch('/ai/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ clientId: effectiveClientId, message: s.prompt, intent: s.key === 'follow' ? 'followup' : undefined }) })
                         .then(async res => { if (!res.ok) throw new Error(await res.text()); return res.json() })
                         .then(data => setMessages(m => [...m, { role: 'bot', content: data.reply || 'No reply', intent: s.key }]))
                         .catch(e => setMessages(m => [...m, { role: 'bot', content: `Error: ${e.message || 'Failed to reach assistant'}` }]))

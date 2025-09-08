@@ -135,7 +135,8 @@ export default function AmendContractsPanel() {
       if (useSb && contractFileId) {
         const res = await fetch('/api/contracts/amend-storage', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contractFileId, naturalChanges: nlCommand, clientId: selectedClientId }) })
         const json = await res.json(); if (!res.ok) throw new Error(json?.error || 'Failed to amend')
-        setApplyResult({ updated: `Contract amended successfully! New version ${json.version} saved to: ${json.newPath}`, summary: json.summary })
+        // Show the actual amended contract text, not just a success message
+        setApplyResult({ updated: json.amendedText || 'Contract amended successfully', summary: json.summary })
         if (json.amendedText) setContractPreview(json.amendedText)
         if (json.updatedContractId) { await loadContractPreview(json.updatedContractId); setSelectedSupabaseContract(json.updatedContractId) }
         // refresh

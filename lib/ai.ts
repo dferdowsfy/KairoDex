@@ -9,39 +9,14 @@ function looksLikeOpenAImodel(m?: string) {
 export async function aiComplete(system: string, user: string, opts: AIOptions = {}) {
   const temperature = opts.temperature ?? Number(process.env.AI_TEMPERATURE ?? '0.35')
 
-  // Prefer OpenAI if key present
-  const openaiKey = process.env.OPENAI_API_KEY
-  if (openaiKey) {
-    const model = (opts.model ?? process.env.OPENAI_TEXT_MODEL ?? 'gpt-4.1').toString()
-    // Basic sanity check: don't pass OpenRouter-style model ids (contain '/') to OpenAI
-    if (model.includes('/')) {
-      throw new Error(`OpenAI selected but model value looks like an OpenRouter model id ('${model}'). Set OPENAI_TEXT_MODEL to an OpenAI model (for example 'gpt-4.1') or pass a compatible model.`)
-    }
-
-    const resp = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${openaiKey}`
-      },
-      body: JSON.stringify({
-        model,
-        temperature,
-        messages: [
-          { role: 'system', content: system },
-          { role: 'user', content: user }
-        ]
-      })
-    })
-    if (!resp.ok) throw new Error(`AI error (OpenAI): ${await resp.text()}`)
-    const data = await resp.json()
-    return data?.choices?.[0]?.message?.content ?? ''
-  }
-
-  // Next: OpenRouter
+  // Force OpenRouter for gpt-4o-mini-search-preview model
+  const requestedModel = opts.model ?? process.env.AI_MODEL ?? process.env.OPENAI_TEXT_MODEL ?? 'gpt-4o-mini-search-preview'
+  const isOpenRouterModel = requestedModel.includes('/') || requestedModel === 'gpt-4o-mini-search-preview'
+  
+  // If we have OpenRouter key and the model is OpenRouter-style, use OpenRouter
   const openrouterKey = process.env.OPENROUTER_API_KEY
-  if (openrouterKey) {
-    const model = (opts.model ?? process.env.AI_MODEL ?? 'perplexity/sonar-reasoning-pro').toString()
+  if (openrouterKey && isOpenRouterModel) {
+    const model = requestedModel.includes('/') ? requestedModel : `openai/${requestedModel}`
     const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -62,10 +37,34 @@ export async function aiComplete(system: string, user: string, opts: AIOptions =
     return data?.choices?.[0]?.message?.content ?? ''
   }
 
-  // Finally: Google Gemini
+  // Fallback to OpenAI if key present and model is OpenAI-compatible
+  const openaiKey = process.env.OPENAI_API_KEY
+  if (openaiKey && !isOpenRouterModel) {
+    const model = requestedModel
+    const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${openaiKey}`
+      },
+      body: JSON.stringify({
+        model,
+        temperature,
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: user }
+        ]
+      })
+    })
+    if (!resp.ok) throw new Error(`AI error (OpenAI): ${await resp.text()}`)
+    const data = await resp.json()
+    return data?.choices?.[0]?.message?.content ?? ''
+  }
+
+  // Final fallback: Google Gemini
   const geminiKey = process.env.GEMINI_API_KEY
   if (geminiKey) {
-    const model = (opts.model ?? process.env.GEMINI_TEXT_MODEL ?? 'gemini-1.5-flash').toString()
+    const model = (process.env.GEMINI_TEXT_MODEL ?? 'gemini-1.5-flash').toString()
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`
     const resp = await fetch(url, {
       method: 'POST',
@@ -81,5 +80,5 @@ export async function aiComplete(system: string, user: string, opts: AIOptions =
     return data?.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
   }
 
-  throw new Error('No AI provider configured. Set OPENAI_API_KEY, OPENROUTER_API_KEY, or GEMINI_API_KEY.')
+  throw new Error('No AI provider configured. Set OPENROUTER_API_KEY for gpt-4o-mini-search-preview or other model keys.')
 }

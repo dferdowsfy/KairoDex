@@ -133,7 +133,7 @@ Constraints:
 - id may be empty string; client_id and user_id will be filled by the system.
 
 Return ONLY the JSON array. Notes text:\n${text}`
-      const out = await aiComplete(system, prompt, { model: process.env.OPENAI_TEXT_MODEL || process.env.AI_MODEL || 'gpt-4o-mini', temperature: 0.2 })
+      const out = await aiComplete(system, prompt, { model: process.env.AI_MODEL || 'openai/gpt-4o-mini-search-preview', temperature: 0.2 })
       const jsonStart = out.indexOf('[')
       const jsonEnd = out.lastIndexOf(']')
       const parsed = JSON.parse(out.slice(jsonStart, jsonEnd + 1))
