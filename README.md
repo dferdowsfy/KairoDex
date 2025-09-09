@@ -33,7 +33,7 @@ npm run dev
 - Password reset: POST /api/auth/reset/request then follow email link to /reset-password.
 - Session cookies: HttpOnly, Secure, SameSite=Strict. Idle timeout and absolute lifetime configurable via SESSION_IDLE_MIN and SESSION_ABS_HOURS.
 - MFA endpoints are scaffolded under /api/auth/mfa (501 until wired to a TOTP provider).
-This starts Next.js on the next available port (3000/3001).
+This starts Next.js on port 3002 (configured) or the next available if 3002 is busy.
 
 ```
 npm run typecheck

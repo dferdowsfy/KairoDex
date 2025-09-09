@@ -23,10 +23,11 @@ export default function CadenceScheduler({
   initial?: Partial<CadenceSelection>
   maxPreview?: number
 }) {
+  const DEBUG = true
   const now = new Date()
   const defDate = toDateInput(now)
   const defTime = toTimeInput(now)
-  const [cadence, setCadence] = useState<Cadence>(initial?.cadence || 'biweekly')
+  const [cadence, setCadence] = useState<Cadence>(initial?.cadence || 'weekly')
   const [count, setCount] = useState<number>(initial?.count || 6)
   const [startDate, setStartDate] = useState<string>(initial?.startDate || defDate)
   const [time, setTime] = useState<string>(initial?.time || defTime)
@@ -75,14 +76,16 @@ export default function CadenceScheduler({
 
   const selected = useMemo(() => preview.filter((_, i) => !exclusions[i]), [preview, exclusions])
 
-  useEffect(() => { onChange(selected) }, [selected, onChange])
+  useEffect(() => { 
+    onChange(selected) 
+  }, [selected, onChange]) 
 
-  // If parent provides new initial startDate/time, sync internal state
+  // If parent provides new initial startDate/time/cadence, sync internal state
   useEffect(() => {
     if (initial?.startDate && initial.startDate !== startDate) setStartDate(initial.startDate)
     if (initial?.time && initial.time !== time) setTime(initial.time)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initial?.startDate, initial?.time])
+    if (initial?.cadence && initial.cadence !== cadence) setCadence(initial.cadence)
+  }, [initial?.startDate, initial?.time, initial?.cadence])
 
   return (
     <div className="space-y-4">
@@ -102,7 +105,10 @@ export default function CadenceScheduler({
                 key={opt.key}
                 type="button"
                 aria-pressed={cadence === (opt.key as Cadence)}
-                onClick={() => setCadence(opt.key as Cadence)}
+                onClick={() => {
+                  if (DEBUG) console.log('Cadence option clicked:', opt.key)
+                  setCadence(opt.key as Cadence)
+                }}
                 className={`px-3 py-2 rounded-lg text-sm border transition-colors ${cadence === (opt.key as Cadence) ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-900 border-slate-200 hover:border-slate-300'}`}>
                 {opt.label}
               </button>
@@ -124,7 +130,7 @@ export default function CadenceScheduler({
           <div className="text-sm text-slate-600 mb-2">Day of week</div>
           <div className="flex flex-wrap gap-3">
             {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map((d, i) => (
-              <button key={i} type="button" onClick={()=>setWeekday(i)}
+              <button key={i} type="button" onClick={()=>{ if (DEBUG) console.log('Weekday clicked:', i); setWeekday(i) }}
                 className={`px-4 py-2 rounded-full border text-sm transition-colors ${weekday===i?'bg-slate-900 text-white border-slate-900':'bg-white text-slate-900 border-slate-200 hover:border-slate-300'}`}>{d}</button>
             ))}
           </div>
@@ -163,7 +169,7 @@ export default function CadenceScheduler({
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-end">
         <div>
           <div className="text-sm text-slate-600 mb-2">Occurrences</div>
-          <input type="number" min={1} max={36} value={count} onChange={e=>setCount(Number(e.target.value))} className="h-12 w-full input-neon px-3 text-sm" />
+          <input type="number" min={1} max={36} value={count} onChange={e=>{ if (DEBUG) console.log('Occurrences changed:', e.target.value); setCount(Number(e.target.value)) }} className="h-12 w-full input-neon px-3 text-sm" />
         </div>
         <div className="sm:col-span-2 text-sm text-slate-500">Preview first {Math.min(maxPreview, count)} occurrences — uncheck any to exclude specific dates from the series.</div>
       </div>
@@ -177,7 +183,7 @@ export default function CadenceScheduler({
             const excluded = !!exclusions[i]
             return (
               <li key={i} className="flex items-center gap-3">
-                <input id={id} type="checkbox" checked={!excluded} onChange={(e)=>setExclusions(prev=>({ ...prev, [i]: !e.target.checked }))} className="h-5 w-5 rounded-sm border-slate-300" />
+                <input id={id} type="checkbox" checked={!excluded} onChange={(e)=>{ if (DEBUG) console.log('Toggle preview checkbox index:', i, 'checked:', e.target.checked); setExclusions(prev=>({ ...prev, [i]: !e.target.checked })) }} className="h-5 w-5 rounded-sm border-slate-300" />
                 <label htmlFor={id} className={`text-sm ${excluded?'line-through text-slate-400':'text-slate-900'}`}>{label}</label>
                 <div className="ml-auto text-xs text-slate-400">{i+1}</div>
               </li>

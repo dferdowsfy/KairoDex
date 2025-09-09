@@ -1,25 +1,67 @@
-export const runtime = 'edge'
-import { NextRequest } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
+import { sendEmail } from '@/lib/emailProviders'
+import { sanitizeEmailBody } from '@/lib/emailSanitizer'
+import { supabaseServer } from '@/lib/supabaseServer'
 
 export async function POST(req: NextRequest) {
   try {
-    const { provider, to, subject, body } = await req.json()
-    if (!provider || !to || !body) {
-      return new Response(JSON.stringify({ error: 'provider, to, and body are required' }), { status: 400 })
+  const { to, subject, content } = await req.json()
+    
+    if (!to || !subject || !content) {
+      return NextResponse.json({ 
+        error: 'Missing required fields: to, subject, content' 
+      }, { status: 400 })
     }
 
-    const useMocks = (process.env.NEXT_PUBLIC_USE_MOCKS ?? 'true') !== 'false'
+    console.log(`Sending immediate email to: ${to}`)
+    console.log(`Subject: ${subject}`)
+    
+    // Attempt to get authenticated user to personalize From / Reply-To
+    let fromEmail: string | undefined
+    let fromName: string | undefined
+    let replyTo: string | undefined
+    try {
+      const supabase = supabaseServer()
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        fromEmail = user.email || undefined
+        // If user metadata has display name fields
+        const meta: any = user.user_metadata || {}
+        fromName = meta.full_name || meta.name || undefined
+        replyTo = fromEmail // default reply-to is user email
+      }
+    } catch {}
 
-    if (useMocks) {
-      // Simulate sending without leaving the page
-      return new Response(JSON.stringify({ ok: true, provider, to }), { status: 200 })
+  const cleaned = sanitizeEmailBody(subject, content)
+  const result = await sendEmail({ to, subject, content: cleaned, fromEmail, fromName, replyTo })
+    
+    if (result.success) {
+      console.log(`✅ Email sent successfully to ${to}`)
+      if (result.previewUrl) {
+        console.log(`🔍 Preview URL (Ethereal / test): ${result.previewUrl}`)
+      }
+      return NextResponse.json({ 
+        success: true,
+        messageId: result.messageId,
+        provider: result.provider,
+        to,
+        previewUrl: result.previewUrl,
+  meta: { ...result.meta, sanitized: cleaned !== content }
+      })
+    } else {
+      console.log(`❌ Failed to send email to ${to}: ${result.error}`)
+      return NextResponse.json({ 
+        error: result.error || 'Failed to send email',
+        provider: result.provider,
+        meta: result.meta
+      }, { status: 500 })
     }
 
-    // Placeholder for real integrations (OAuth + provider APIs)
-    // Gmail: Gmail API via OAuth2 (users.messages.send)
-    // Outlook: Microsoft Graph /sendMail
-    return new Response(JSON.stringify({ error: 'Email provider not configured' }), { status: 501 })
   } catch (e: any) {
-    return new Response(JSON.stringify({ error: 'Unexpected', details: e?.message }), { status: 500 })
+    console.error('Email send API error:', e)
+    return NextResponse.json({ 
+      error: 'Internal server error',
+      details: e?.message 
+    }, { status: 500 })
   }
 }

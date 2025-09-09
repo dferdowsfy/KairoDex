@@ -30,7 +30,7 @@ This agreement is contingent upon buyer's inspection within 7 days.`,
       clientContext: {}
     };
 
-    const response = await execAsync(`curl -s -X POST http://localhost:3001/api/contracts/apply/ -H "Content-Type: application/json" -d @- << 'EOF'
+  const response = await execAsync(`curl -s -X POST http://localhost:3002/api/contracts/apply/ -H "Content-Type: application/json" -d @- << 'EOF'
 ${JSON.stringify(templateTest)}
 EOF`);
     const result = JSON.parse(response.stdout);
@@ -50,7 +50,7 @@ EOF`);
     
   } catch (error) {
     console.error('❌ Test failed:', error.message);
-    console.error('Make sure your development server is running on localhost:3001');
+  console.error('Make sure your development server is running on localhost:3002');
   }
 }
 

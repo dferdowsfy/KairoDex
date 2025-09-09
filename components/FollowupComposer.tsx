@@ -1,5 +1,6 @@
 "use client"
 import React, { useMemo, useState } from 'react'
+import { sanitizeEmailBody, cleanPlaceholders } from '@/lib/emailSanitizer'
 import { useUI } from '@/store/ui'
 import { useClient } from '@/hooks/useClient'
 import { useNoteItems } from '@/hooks/useNoteItems'
@@ -83,7 +84,12 @@ export default function FollowupComposer() {
             }
             const res = await fetch('/api/ai/followup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ clientId: selectedClientId, channel: fuChannel, instruction: `Tone: ${fuTone}. Use this context:\n${JSON.stringify(context)}\n${fuInstruction}` }) })
             const json = await res.json(); if (!res.ok) throw new Error(json?.error || 'Failed to generate')
-            setFuDraft(json.draft || '')
+            let draft = json.draft || ''
+            const displayName = user?.user_metadata?.full_name || user?.user_metadata?.name || user?.email?.split('@')[0] || 'Agent'
+            draft = draft.replace(/\[Your Name\]/gi, displayName)
+            draft = sanitizeEmailBody('Follow-up', draft)
+            draft = cleanPlaceholders(draft, activeClient?.name || undefined, displayName)
+            setFuDraft(draft)
           } catch (e:any) { 
             pushToast({ type:'error', message: e?.message || 'Generation failed'}) 
           } finally { 
@@ -154,6 +160,7 @@ export default function FollowupComposer() {
                 const to: string[] = (activeClient as any)?.email ? [(activeClient as any).email] : []
                 const cc: string[] = []
                 let sendAt = new Date()
+                const displayName = user?.user_metadata?.full_name || user?.user_metadata?.name || user?.email?.split('@')[0] || 'Agent'
                 if (schedule==='later') {
                   const later = new Date(); later.setHours(17,0,0,0); if (later < new Date()) later.setDate(later.getDate()+1); sendAt = later
                 } else if (schedule==='tomorrow') {
@@ -168,8 +175,8 @@ export default function FollowupComposer() {
                   to_recipients: to,
                   cc_recipients: cc,
                   subject: 'Follow-up',
-                  body_html: fuDraft,
-                  body_text: fuDraft,
+                  body_html: cleanPlaceholders(fuDraft, activeClient?.name || undefined, displayName),
+                  body_text: cleanPlaceholders(fuDraft, activeClient?.name || undefined, displayName),
                   noteitem_ids: includeIds,
                   send_at: sendAt.toISOString(),
                 }

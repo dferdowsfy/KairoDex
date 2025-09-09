@@ -75,6 +75,7 @@ export function ClientsTopBar() {
                 <Menu className="h-5 w-5" />
               </summary>
               <div className="absolute right-0 mt-2 w-40 bg-surface border border-default rounded-md shadow-lg p-1 text-ink z-50">
+                <a href="/emails" className="block px-3 py-2 rounded hover:bg-surface-2 no-underline text-ink">📧 Emails</a>
                 <a href="/settings" className="block px-3 py-2 rounded hover:bg-surface-2 no-underline text-ink">Settings</a>
               </div>
             </details>

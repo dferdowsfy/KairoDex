@@ -3,7 +3,7 @@
 echo "Testing amend-storage API..."
 
 # Test with a known contract ID
-response=$(curl -s -X POST "http://localhost:3001/api/contracts/amend-storage" \
+response=$(curl -s -X POST "http://localhost:3002/api/contracts/amend-storage" \
   -H "Content-Type: application/json" \
   -d '{
     "contractFileId": "9b96cb41-42ca-4c03-be59-cf1c57ce4941",

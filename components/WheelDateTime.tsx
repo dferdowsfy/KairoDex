@@ -9,7 +9,7 @@ type Props = {
   minuteStep?: number // step for minutes
 }
 
-const ITEM_H = 40 // px
+const ITEM_H = 48 // px (increased for better spacing)
 
 export default function WheelDateTime({ value, onChange, days = 60, minuteStep = 5 }: Props) {
   const today = useMemo(() => new Date(), [])
@@ -43,7 +43,6 @@ export default function WheelDateTime({ value, onChange, days = 60, minuteStep =
   const [minuteIdx, setMinuteIdx] = useState(initial.minuteIdx)
   const [apIdx, setApIdx] = useState<number>(initial.ap)
 
-  const dateRef = useRef<HTMLDivElement>(null)
   const hourRef = useRef<HTMLDivElement>(null)
   const minRef = useRef<HTMLDivElement>(null)
   const apRef = useRef<HTMLDivElement>(null)
@@ -54,7 +53,6 @@ export default function WheelDateTime({ value, onChange, days = 60, minuteStep =
       if (!el) return
       el.scrollTo({ top: index * ITEM_H, behavior: 'instant' as any })
     }
-    scrollTo(dateRef.current, dateIdx)
     scrollTo(hourRef.current, hourIdx)
     scrollTo(minRef.current, minuteIdx)
     scrollTo(apRef.current, apIdx)
@@ -71,29 +69,11 @@ export default function WheelDateTime({ value, onChange, days = 60, minuteStep =
   }, [dateIdx, hourIdx, minuteIdx, apIdx, dates, hours, minutes, onChange])
 
   return (
-    <div className="relative grid grid-cols-4 gap-2">
-      <div className="flex gap-2">
-        {/* single scroll container for month+day so they stay aligned */}
-        <div ref={dateRef} onScroll={(e)=>{
-          const el = e.currentTarget
-          // sync date index based on scrollTop
-          const i = Math.round(el.scrollTop / ITEM_H)
-          setDateIdx(Math.max(0, Math.min(dates.length - 1, i)))
-          el.scrollTo({ top: i * ITEM_H, behavior: 'smooth' })
-        }} className="relative h-40 overflow-y-auto snap-y snap-mandatory rounded-lg border border-white/50 bg-white/90" style={{ scrollBehavior: 'smooth' }}>
-          <div style={{ height: ITEM_H }} aria-hidden />
-          <div className="flex">
-            <div className="w-full">
-              <WheelDateDay values={dates.map(d => String(d.da))} index={dateIdx} setIndex={setDateIdx} />
-            </div>
-          </div>
-          <div style={{ height: ITEM_H }} aria-hidden />
-        </div>
-      </div>
+    <div className="relative grid grid-cols-3 gap-6">
       <WheelColumn refEl={hourRef} values={hours.map(n => String(n))} index={hourIdx} setIndex={setHourIdx} />
       <WheelColumn refEl={minRef} values={minutes.map(n => String(n).padStart(2,'0'))} index={minuteIdx} setIndex={setMinuteIdx} />
       <WheelColumn refEl={apRef} values={[...ampm]} index={apIdx} setIndex={setApIdx} />
-  <div aria-hidden className="pointer-events-none absolute inset-x-0 top-1/2 -translate-y-1/2 h-10 border-y border-white/40"></div>
+  <div aria-hidden className="pointer-events-none absolute inset-x-0 top-1/2 -translate-y-1/2 h-12 border-y border-white/40"></div>
     </div>
   )
 }
@@ -114,10 +94,10 @@ function WheelColumn({ values, index, setIndex, refEl }: { values: string[]; ind
     if (el) el.scrollTop = index * ITEM_H
   }, [index, refEl])
   return (
-  <div ref={refEl} onScroll={onScroll} className="relative h-40 overflow-y-auto snap-y snap-mandatory rounded-lg border border-white/50 bg-white/90" style={{ scrollBehavior: 'smooth' }}>
+  <div ref={refEl} onScroll={onScroll} className="relative h-40 overflow-y-auto snap-y snap-mandatory rounded-lg border border-white/50 bg-white/90 px-2" style={{ scrollBehavior: 'smooth' }}>
       <div style={{ height: ITEM_H }} aria-hidden></div>
       {values.map((v, i) => (
-  <div key={i} className={`h-10 flex items-center justify-center snap-center ${i===index ? 'text-ink font-medium' : 'text-ink/60'}`}>{v}</div>
+  <div key={i} className={`h-12 flex items-center justify-center snap-center text-base ${i===index ? 'text-ink font-semibold' : 'text-ink/60'}`}>{v}</div>
       ))}
       <div style={{ height: ITEM_H }} aria-hidden></div>
     </div>

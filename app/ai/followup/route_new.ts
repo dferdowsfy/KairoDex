@@ -72,12 +72,6 @@ Grounding:
 
     const prompt = `CLIENT_CONTEXT:\n${JSON.stringify(clientContext, null, 2)}\nChannel: ${channel}\nInstruction: ${instruction ?? 'Draft a brief, friendly follow-up email.'}`
 
-  // Debug logging (remove in production)
-  console.log('EMAIL GENERATION DEBUG:')
-  console.log('Client ID:', clientId)
-  console.log('Client Context:', JSON.stringify(clientContext, null, 2))
-  console.log('Instruction:', instruction)
-
   // Call AI using provider selected via env keys
   const draft: string = await aiComplete(system, prompt, { temperature: 0.3 })
 
