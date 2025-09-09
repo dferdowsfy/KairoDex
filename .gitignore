@@ -4,3 +4,6 @@ out
 .DS_Store
 .env*
 coverage
+
+# Ignore TypeScript build info files
+*.tsbuildinfo

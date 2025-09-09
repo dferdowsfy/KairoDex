@@ -40,8 +40,8 @@ const config = {
         hostname: 'images.unsplash.com'
       }
     ],
-    // On Netlify, the Next image optimization may not run the same way as Vercel.
-    // Disable the built-in optimizer if you prefer to serve images statically or via a proxy.
+  // On some hosts, the Next image optimization may not run the same as on other platforms.
+  // Disable the built-in optimizer if you prefer to serve images statically or via a proxy.
     unoptimized: true
   },
   // For Netlify deployment
