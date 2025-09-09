@@ -1,11 +1,14 @@
 "use client"
-import React, { useMemo, useState } from 'react'
+import React, { useMemo, useState, useCallback } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useUI } from '@/store/ui'
+import { useSessionUser } from '@/hooks/useSessionUser'
+import { sanitizeEmailBody, cleanPlaceholders } from '@/lib/emailSanitizer'
 import { useClient } from '@/hooks/useClient'
 import { useNoteItems } from '@/hooks/useNoteItems'
 import type { NoteItem } from '@/lib/types'
 import { useEmailJobs } from '@/hooks/useEmailJobs'
+import { useEmailModalIntegration } from '@/hooks/useEmailAutomation'
 import CadenceScheduler from '@/components/CadenceScheduler'
 import WheelDateTime from '@/components/WheelDateTime'
 import { useClients } from '@/hooks/useClients'
@@ -102,11 +105,13 @@ function extractInsightsStrict(items: NoteItem[]) {
 }
 
 export default function Snapshot() {
+  const DEBUG = true
   const { selectedClientId, pushToast, followIncludeIds, setFollowIncludeIds, setChatOpen, setChatPrefill } = useUI() as any
   const { data: client } = useClient((selectedClientId || '') as any)
   const { data: items = [], upsert } = useNoteItems(selectedClientId || undefined)
   const { data: emailJobs = [] } = useEmailJobs(selectedClientId || undefined)
   const { data: clients = [] } = useClients()
+  const { user } = useSessionUser()
   const qc = useQueryClient()
   const budget = useMemo(()=>extractBudget(items), [items])
   const timeline = useMemo(()=>extractTimeline(items), [items])
@@ -131,13 +136,56 @@ export default function Snapshot() {
   const [emailBusy, setEmailBusy] = useState(false)
   const [scheduleAt, setScheduleAt] = useState('')
   // Rolling picker state for scheduling
-  const [selectedDate, setSelectedDate] = useState('') // YYYY-MM-DD
-  const [selectedTime, setSelectedTime] = useState('') // HH:MM (24h)
+  const [selectedDate, setSelectedDate] = useState(() => {
+    // Default to tomorrow
+    const tomorrow = new Date()
+    tomorrow.setDate(tomorrow.getDate() + 1)
+    const yyyy = tomorrow.getFullYear()
+    const mm = String(tomorrow.getMonth() + 1).padStart(2, '0')
+    const dd = String(tomorrow.getDate()).padStart(2, '0')
+    return `${yyyy}-${mm}-${dd}`
+  })
+  const [selectedTime, setSelectedTime] = useState('09:00') // Default to 9 AM
   const [scheduleMode, setScheduleMode] = useState<'single'|'cadence'>('single')
   const [cadenceDates, setCadenceDates] = useState<Date[]>([])
   // Calendar navigation for single schedule
   const [calYear, setCalYear] = useState<number>(new Date().getFullYear())
   const [calMonth, setCalMonth] = useState<number>(new Date().getMonth()) // 0-11
+
+  // Memoized callback to prevent infinite re-renders in CadenceScheduler
+  const handleCadenceDatesChange = useCallback((dates: Date[]) => {
+    setCadenceDates(prevDates => {
+      // Compare dates to prevent unnecessary updates
+      if (prevDates.length === dates.length && 
+          prevDates.every((date, index) => date.getTime() === dates[index]?.getTime())) {
+        return prevDates // Return same reference if content is identical
+      }
+      return dates
+    })
+  }, [])
+
+  // Email automation integration
+  const emailIntegration = useEmailModalIntegration();
+  
+  // Set up email integration state when modal opens or client changes
+  React.useEffect(() => {
+    if (emailOpen && selectedClientId) {
+      emailIntegration.setSelectedClient(selectedClientId);
+      emailIntegration.setEmailContent({
+        subject: 'Quick follow-up',
+        content: emailDraft,
+        tone: emailTone as 'professional'
+      });
+    }
+  }, [emailOpen, selectedClientId, emailDraft, emailTone]);
+
+  // Memoized initial prop for CadenceScheduler to prevent unnecessary resets
+  const cadenceInitial = useMemo(() => {
+    if (selectedDate && selectedTime) {
+      return { startDate: selectedDate, time: selectedTime }
+    }
+    return undefined
+  }, [selectedDate, selectedTime])
 
   const dateOptions = useMemo(() => {
     const out: { label: string; value: string }[] = []
@@ -191,6 +239,11 @@ export default function Snapshot() {
   React.useEffect(() => {
     if (selectedDate && selectedTime) setScheduleAt(`${selectedDate}T${selectedTime}`)
   }, [selectedDate, selectedTime])
+
+  // Debug: log selectedDate changes to help diagnose why calendar clicks don't show visually
+  React.useEffect(() => {
+    if (DEBUG) console.log('selectedDate changed ->', selectedDate)
+  }, [selectedDate])
 
   // Ensure modals appear at the top of the viewport
   React.useEffect(() => {
@@ -291,32 +344,39 @@ export default function Snapshot() {
     return (
       <div className="space-y-3">
         <CadenceScheduler
-          initial={selectedDate && selectedTime ? { startDate: selectedDate, time: selectedTime } : undefined}
-          onChange={(ds)=>setCadenceDates(ds)}
+          key="cadence-scheduler"
+          initial={cadenceInitial}
+          onChange={handleCadenceDatesChange}
         />
         <div className="flex items-center justify-end gap-2">
           <button
             type="button"
             className="rounded-xl bg-emerald-600 text-white px-4 py-2 disabled:opacity-50"
-            disabled={!emailDraft || cadenceDates.length===0 || !selectedClientId || emailBusy || !(client as any)?.email}
+            disabled={!emailDraft.trim() || cadenceDates.length===0 || !selectedClientId || emailBusy || !(client as any)?.email || emailIntegration.isProcessing}
             onClick={async()=>{
               try {
                 setEmailBusy(true)
-                const to = (client as any)?.email ? [ (client as any)?.email ] : []
-                const send_at_list = cadenceDates.map(d => d.toISOString())
-                const res = await fetch('/api/email/schedule/batch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ client_id: selectedClientId, to_recipients: to, subject: 'Quick follow-up', body_text: emailDraft, send_at_list }) })
-                const j = await res.json(); if (!res.ok) throw new Error(j?.error || 'Failed to schedule series')
-                pushToast({ type:'success', message: `Scheduled ${send_at_list.length} emails` })
+                
+                // Use the new email automation system
+                const result = await emailIntegration.createAndScheduleEmail(
+                  cadenceDates,
+                  'weekly' // Default to weekly, could be enhanced to detect from cadence
+                );
+                
+                pushToast({ 
+                  type: 'success', 
+                  message: `${result.message || 'Created campaign with scheduled emails'}` 
+                });
+                
                 // Also persist reminders/notifications for the scheduled series so they appear in the Home Snapshot
                 try {
-                  for (const sa of send_at_list) {
-                    // create a lightweight deadline reminder for each scheduled send
+                  for (const date of cadenceDates) {
                     await upsert.mutateAsync({
                       client_id: selectedClientId,
                       kind: 'deadline',
                       title: `Scheduled: Quick follow-up (email)`,
                       status: 'scheduled',
-                      date: sa,
+                      date: date.toISOString(),
                       tags: Array.from(new Set([...(client as any)?.email ? ['scheduled_email'] : [] , 'reminder'])),
                       source: 'user_note'
                     } as any)
@@ -324,10 +384,12 @@ export default function Snapshot() {
                   pushToast({ type: 'success', message: 'Saved scheduled reminders to dashboard', subtle: true })
                 } catch (e:any) {
                   // non-fatal: scheduling succeeded but saving reminders failed
-                  pushToast({ type:'error', message: e?.message || 'Scheduled but failed to save reminders' })
+                  pushToast({ type:'error', message: e?.message || 'Campaign created but failed to save reminders' })
                 }
                 setEmailOpen(false)
-              } catch(e:any) { pushToast({ type:'error', message: e?.message || 'Batch schedule failed' }) }
+              } catch(e:any) { 
+                pushToast({ type:'error', message: e?.message || 'Failed to create email campaign' }) 
+              }
               finally { setEmailBusy(false) }
             }}
           >Schedule Series</button>
@@ -365,11 +427,11 @@ export default function Snapshot() {
           </div>
         </div>
         <div className="ml-auto flex items-center gap-2">
-          <button type="button" className="min-h-[40px] px-4 rounded-xl bg-slate-100 text-slate-900 border border-slate-200 text-sm" onClick={()=>setAddOpen(true)}>+ Add Note</button>
+          <button type="button" className="min-h-[40px] px-4 rounded-xl bg-slate-100 text-slate-900 border border-slate-200 text-sm" onClick={()=>{ if (DEBUG) console.log('Add Note opener clicked'); setAddOpen(true)}}>+ Add Note</button>
           <button
             type="button"
             className="min-h-[40px] px-4 rounded-xl bg-slate-900 text-white text-sm"
-            onClick={()=> setEmailOpen(true)}
+            onClick={()=>{ if (DEBUG) console.log('Generate Email opener clicked'); setEmailOpen(true)}}
           >Generate Email</button>
         </div>
       </div>
@@ -530,10 +592,10 @@ export default function Snapshot() {
       </div>
 
       {/* Add Note modal */}
-      {addOpen && (
-        <div role="dialog" aria-modal className="fixed inset-0 z-[80] grid items-start justify-center pt-6 sm:pt-10">
-          <div className="absolute inset-0 bg-black/30" onClick={()=>!addBusy && setAddOpen(false)} />
-          <div className="relative z-[81] w-[min(680px,95vw)] rounded-2xl bg-white border border-slate-200 shadow-xl p-5">
+          {addOpen && (
+        <div role="dialog" aria-modal className="fixed inset-0 z-[9999] grid items-start justify-center pt-6 sm:pt-10 pointer-events-auto">
+          <div className="absolute inset-0 bg-black/30 z-[9998]" onClick={()=>{ if (DEBUG) console.log('Add Note backdrop clicked'); !addBusy && setAddOpen(false)}} />
+          <div className="relative z-[10000] w-[min(680px,95vw)] rounded-2xl bg-white border border-slate-200 shadow-xl p-5 pointer-events-auto">
             <div className="text-xl font-semibold text-slate-900 mb-2">Add Notes</div>
             <p className="text-sm text-slate-600 mb-3">Paste client notes. I’ll generate tiles for key dates, next steps, budget, and more.</p>
             <div className="mb-3 flex items-center gap-2">
@@ -563,9 +625,9 @@ export default function Snapshot() {
 
       {/* Generate Email modal */}
       {emailOpen && (
-        <div role="dialog" aria-modal className="fixed inset-0 z-[80] grid items-start justify-center pt-6 sm:pt-10">
-          <div className="absolute inset-0 bg-black/30" onClick={()=>!emailBusy && setEmailOpen(false)} />
-          <div className="relative z-[81] w-[min(760px,95vw)] rounded-2xl bg-white border border-slate-200 shadow-xl p-5 space-y-3">
+        <div role="dialog" aria-modal className="fixed inset-0 z-[9999] grid items-start justify-center pt-6 sm:pt-10 pointer-events-auto">
+          <div className="absolute inset-0 bg-black/30 z-[9998]" onClick={()=>{ if (DEBUG) console.log('Email modal backdrop clicked'); !emailBusy && setEmailOpen(false)}} />
+            <div className="relative z-[10000] w-[min(900px,95vw)] rounded-2xl bg-white border border-slate-200 shadow-xl p-6 space-y-4 pointer-events-auto" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center gap-3">
               <div className="text-xl font-semibold text-slate-900">Generate Email</div>
               <div className="ml-auto inline-flex items-center gap-2 text-sm">
@@ -577,14 +639,33 @@ export default function Snapshot() {
             </div>
             <textarea value={emailInstruction} onChange={(e)=>setEmailInstruction(e.target.value)} className="w-full min-h-[100px] input-neon p-3 text-base" placeholder="Instruction (e.g., reference timeline, ask for next step)" />
             <div className="flex items-center gap-2">
-              <button type="button" className="rounded-xl bg-slate-900 text-white px-4 py-2 disabled:opacity-50 inline-flex items-center gap-2" disabled={emailBusy || !selectedClientId}
+          <button type="button" className="rounded-xl bg-slate-900 text-white px-4 py-2 disabled:opacity-50 inline-flex items-center gap-2" disabled={emailBusy || !selectedClientId}
                 onClick={async()=>{
                   try {
                     setEmailBusy(true)
-                    const res = await fetch('/api/ai/followup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ clientId: selectedClientId, channel: 'email', instruction: `${emailInstruction}\n\nTone: ${emailTone}` }) })
+                    
+                    // Get client name for personalization
+                    const clientName = client?.name || 'there'
+                    const enhancedInstruction = `${emailInstruction}
+
+Context: Write to ${clientName}. Use their name naturally in greeting.
+
+Tone: ${emailTone}`
+                    
+                    const res = await fetch('/api/ai/followup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ clientId: selectedClientId, channel: 'email', instruction: enhancedInstruction }) })
                     const j = await res.json()
                     if (!res.ok) throw new Error(j?.error || 'Failed to generate')
-                    setEmailDraft(j.draft || '')
+                    let draft = j.draft || ''
+                    
+                    // Replace placeholder name tokens with user info and clean any bracketed placeholders
+                    const displayName = user?.user_metadata?.full_name || user?.user_metadata?.name || user?.email?.split('@')[0] || 'Agent'
+                    draft = draft.replace(/\[Your Name\]/gi, displayName)
+
+                    // Remove leading in-body Subject line duplication if model inserted
+                    draft = sanitizeEmailBody('Quick follow-up', draft)
+                    // Remove other bracketed placeholders if client info missing
+                    draft = cleanPlaceholders(draft, client?.name || undefined, displayName)
+                    setEmailDraft(draft)
                   } catch(e:any) { pushToast({ type:'error', message: e?.message || 'Failed to generate' }) }
                   finally { setEmailBusy(false) }
                 }}
@@ -597,15 +678,17 @@ export default function Snapshot() {
             <div className="rounded-xl border border-slate-300 bg-white p-3 space-y-3 shadow-sm ring-1 ring-slate-50">
               <div className="font-medium text-slate-900">Schedule</div>
               <div className="flex gap-2">
-                <button type="button" onClick={()=>setScheduleMode('single')} aria-pressed={scheduleMode==='single'} className={`px-4 py-2 rounded-lg text-sm border transition-colors ${scheduleMode==='single'?'bg-slate-900 text-white border-slate-900':'bg-white text-slate-900 border-slate-200 hover:border-slate-300'}`}>Single</button>
-                <button type="button" onClick={()=>setScheduleMode('cadence')} aria-pressed={scheduleMode==='cadence'} className={`px-4 py-2 rounded-lg text-sm border transition-colors ${scheduleMode==='cadence'?'bg-slate-900 text-white border-slate-900':'bg-white text-slate-900 border-slate-200 hover:border-slate-300'}`}>Cadence</button>
+                <button type="button" onClick={()=>{ if (DEBUG) console.log('Schedule mode set: single'); setScheduleMode('single')}} aria-pressed={scheduleMode==='single'} className={`px-4 py-2 rounded-lg text-sm border transition-colors ${scheduleMode==='single'?'bg-slate-900 text-white border-slate-900':'bg-white text-slate-900 border-slate-200 hover:border-slate-300'}`}>Single</button>
+                <button type="button" onClick={()=>{ if (DEBUG) console.log('Schedule mode set: cadence'); setScheduleMode('cadence')}} aria-pressed={scheduleMode==='cadence'} className={`px-4 py-2 rounded-lg text-sm border transition-colors ${scheduleMode==='cadence'?'bg-slate-900 text-white border-slate-900':'bg-white text-slate-900 border-slate-200 hover:border-slate-300'}`}>Cadence</button>
               </div>
 
               {scheduleMode==='single' ? (
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <div>
-                    <div className="text-sm text-slate-600 mb-1">Calendar</div>
-                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                  <div className="lg:col-span-2">
+                    <div className="text-sm text-slate-600 mb-2">Calendar</div>
+                    {/* Visible debug indicator so users can see the selected date even if styles aren't updating */}
+                    <div className="text-xs text-slate-500 mb-2">Selected: <span className="font-medium text-slate-900">{selectedDate || '—'}</span></div>
+                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
                       {/* Month navigation */}
                       <div className="flex items-center justify-between mb-2">
                         <button type="button" className="px-2 py-1 rounded border border-slate-200 bg-white text-slate-900 hover:bg-slate-50" onClick={()=>{
@@ -646,15 +729,16 @@ export default function Snapshot() {
                         while (cells.length % 7 !== 0) cells.push({})
                         return (
                           <div className="overflow-x-auto">
-                            <div className="min-w-[360px]">
-                              <div className="grid grid-cols-7 gap-3">
+                            <div className="min-w-[400px]">
+                              <div className="grid grid-cols-7 gap-4" key={selectedDate || 'calendar-grid'}>
                                 {cells.map((c, idx) => {
-                                  const selected = !!c.dateStr && selectedDate===c.dateStr
-                                  return (
+                                  // Use robust trimmed string comparison to avoid subtle whitespace/format issues
+                                  const selected = !!c.dateStr && String(selectedDate || '').trim() === String(c.dateStr || '').trim()
+                                    return (
                                     <button key={idx} type="button" disabled={!c.day}
-                                      onClick={()=> c.dateStr && setSelectedDate(c.dateStr)}
+                                      onClick={()=>{ if (DEBUG) console.log('Calendar day clicked:', c.dateStr); c.dateStr && setSelectedDate(c.dateStr)}}
                                       aria-pressed={selected}
-                                      className={`inline-flex items-center justify-center w-12 h-12 sm:w-14 sm:h-14 rounded-full border ${c.day ? (selected? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-900 border-slate-200 hover:bg-slate-50') : 'opacity-0 pointer-events-none'}`}
+                                      className={`inline-flex items-center justify-center w-14 h-14 sm:w-16 sm:h-16 rounded-full border ${c.day ? (selected? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-900 border-slate-200 hover:bg-slate-50') : 'opacity-0 pointer-events-none'}`}
                                     >
                                       {c.day ? <span className="text-sm sm:text-base font-medium">{c.day}</span> : null}
                                     </button>
@@ -668,8 +752,8 @@ export default function Snapshot() {
                     </div>
                   </div>
                   <div>
-                    <div className="text-sm text-slate-600 mb-1">Time</div>
-                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                    <div className="text-sm text-slate-600 mb-2">Time</div>
+                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-6">
                       <WheelDateTime
                         value={selectedDate && selectedTime ? new Date(`${selectedDate}T${selectedTime}`) : undefined}
                         onChange={(d) => {
@@ -686,17 +770,25 @@ export default function Snapshot() {
                       />
                     </div>
                   </div>
-                  <div className="flex flex-col gap-2 justify-end">
-                    <div className="flex gap-2">
+                  <div className="flex flex-col gap-3 justify-end">
+                    <div className="flex gap-3">
                       <button
                         type="button"
                         className="rounded-xl bg-emerald-600 text-white px-4 py-2 disabled:opacity-50"
-                        disabled={!emailDraft || !selectedClientId || emailBusy || !(client as any)?.email}
+                        disabled={!emailDraft.trim() || !selectedClientId || emailBusy || !(client as any)?.email}
                         onClick={async() => {
                           try {
                             setEmailBusy(true)
                             const toSingle = (client as any)?.email || ''
-                            const res = await fetch('/api/email/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider: 'mock', to: toSingle, subject: 'Quick follow-up', body: emailDraft }) })
+                            const res = await fetch('/api/email/send', { 
+                              method: 'POST', 
+                              headers: { 'Content-Type': 'application/json' }, 
+                              body: JSON.stringify({ 
+                                to: toSingle, 
+                                subject: 'Quick follow-up', 
+                                content: cleanPlaceholders(sanitizeEmailBody('Quick follow-up', emailDraft), client?.name || undefined, user?.user_metadata?.full_name || user?.user_metadata?.name || user?.email?.split('@')[0] || 'Agent') 
+                              }) 
+                            })
                             const j = await res.json()
                             if (!res.ok) throw new Error(j?.error || 'Failed to send')
                             pushToast({ type: 'success', message: 'Email sent' })
@@ -710,15 +802,53 @@ export default function Snapshot() {
                       <button
                         type="button"
                         className="rounded-xl border border-slate-200 px-4 py-2 disabled:opacity-50"
-                        disabled={!emailDraft || !scheduleAt || !selectedClientId || emailBusy || !(client as any)?.email}
+                        disabled={!emailDraft.trim() || !selectedDate || !selectedTime || !selectedClientId || emailBusy || !(client as any)?.email}
                         onClick={async() => {
                           try {
                             setEmailBusy(true)
-                            const to = (client as any)?.email ? [ (client as any)?.email ] : []
-                            const res = await fetch('/api/email/schedule', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ client_id: selectedClientId, to_recipients: to, subject: 'Quick follow-up', body_text: emailDraft, send_at: new Date(scheduleAt).toISOString() }) })
-                            const j = await res.json()
-                            if (!res.ok) throw new Error(j?.error || 'Failed to schedule')
-                            pushToast({ type:'success', message: 'Email scheduled' })
+                            const recipientEmail = (client as any)?.email || ''
+                            
+                            // Create a campaign first
+                            const campaignRes = await fetch('/api/email/campaigns', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({
+                                client_id: selectedClientId,
+                                title: 'Scheduled Follow-up',
+                                content: cleanPlaceholders(sanitizeEmailBody('Quick follow-up', emailDraft), client?.name || undefined, user?.user_metadata?.full_name || user?.user_metadata?.name || user?.email?.split('@')[0] || 'Agent'),
+                                tone: 'professional',
+                                ai_generated: true
+                              })
+                            })
+                            
+                            if (!campaignRes.ok) {
+                              const campaignError = await campaignRes.json()
+                              throw new Error(campaignError?.error || 'Failed to create campaign')
+                            }
+                            
+                            const campaignResult = await campaignRes.json()
+                            
+                            // Schedule the email
+                            const scheduleAtDateTime = `${selectedDate}T${selectedTime}`
+                            const scheduleRes = await fetch('/api/email/schedules', { 
+                              method: 'POST', 
+                              headers: { 'Content-Type': 'application/json' }, 
+                              body: JSON.stringify({ 
+                                campaign_id: campaignResult.campaign.id,
+                                client_id: selectedClientId,
+                                scheduled_at: new Date(scheduleAtDateTime).toISOString(),
+                                cadence_type: 'single',
+                                subject: 'Quick follow-up',
+                                content: cleanPlaceholders(sanitizeEmailBody('Quick follow-up', emailDraft), client?.name || undefined, user?.user_metadata?.full_name || user?.user_metadata?.name || user?.email?.split('@')[0] || 'Agent'),
+                                recipient_email: recipientEmail
+                              }) 
+                            })
+                            
+                            const scheduleResult = await scheduleRes.json()
+                            if (!scheduleRes.ok) throw new Error(scheduleResult?.error || 'Failed to schedule')
+                            
+                            pushToast({ type:'success', message: 'Email scheduled successfully' })
+                            
                             // Persist a lightweight reminder so it appears in Snapshot scheduled list
                             try {
                               await upsert.mutateAsync({
@@ -726,7 +856,7 @@ export default function Snapshot() {
                                 kind: 'deadline',
                                 title: `Scheduled: Quick follow-up (email)`,
                                 status: 'scheduled',
-                                date: new Date(scheduleAt).toISOString(),
+                                date: new Date(scheduleAtDateTime).toISOString(),
                                 tags: Array.from(new Set([...(client as any)?.email ? ['scheduled_email'] : [] , 'reminder'])),
                                 source: 'user_note'
                               } as any)
