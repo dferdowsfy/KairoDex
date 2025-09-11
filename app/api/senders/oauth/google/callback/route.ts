@@ -9,11 +9,12 @@ export async function GET(req: NextRequest) {
   if (!code) return NextResponse.json({ error: 'Missing code' }, { status: 400 })
 
   // Exchange code for tokens
+  const redirectUri = process.env.GOOGLE_OAUTH_REDIRECT_URI || `${process.env.NEXT_PUBLIC_APP_URL}/api/senders/oauth/google/callback`
   const tokenBody = new URLSearchParams({
     code: code || '',
     client_id: process.env.GOOGLE_OAUTH_CLIENT_ID || '',
     client_secret: process.env.GOOGLE_OAUTH_CLIENT_SECRET || '',
-    redirect_uri: `${process.env.NEXT_PUBLIC_APP_URL}/api/senders/oauth/google/callback`,
+    redirect_uri: redirectUri,
     grant_type: 'authorization_code'
   })
   const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
@@ -22,7 +23,10 @@ export async function GET(req: NextRequest) {
     body: tokenBody.toString()
   })
   const tokenJson: any = await tokenRes.json()
-  if (tokenJson?.error) return NextResponse.json({ error: tokenJson.error_description || tokenJson.error }, { status: 400 })
+  if (tokenJson?.error) {
+    console.warn('[oauth] token exchange failed', tokenRes.status, tokenJson)
+    return NextResponse.json({ error: tokenJson.error_description || tokenJson.error, detail: tokenJson }, { status: 400 })
+  }
 
   const refresh_token: string | undefined = tokenJson.refresh_token
   const access_token: string | undefined = tokenJson.access_token
@@ -31,7 +35,10 @@ export async function GET(req: NextRequest) {
   const meRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', { headers: { Authorization: `Bearer ${access_token}` } })
   const me: any = await meRes.json()
   const email: string | undefined = me?.email
-  if (!email) return NextResponse.json({ error: 'Unable to determine user email' }, { status: 400 })
+  if (!email) {
+    console.warn('[oauth] userinfo failed', meRes.status, me)
+    return NextResponse.json({ error: 'Unable to determine user email', detail: me }, { status: 400 })
+  }
 
   // Save sender row
   const supabase = supabaseServer()
@@ -60,7 +67,10 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (!userId) {
+    console.warn('[oauth] no user id after fallback – state:', state)
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
 
   const upsert = await supabase.from('senders').upsert({ owner_id: userId, email, method: 'oauth_google', verified: true, oauth_refresh_token: refresh_token, meta: { provider: 'google' } }, { onConflict: 'owner_id,email' }).select().single()
   if (upsert.error) return NextResponse.json({ error: upsert.error.message }, { status: 500 })
