@@ -1,5 +1,6 @@
 "use client"
 import { useState } from 'react'
+import { useEmailComposer } from '@/store/useEmailComposer'
 import { useNotes } from '@/hooks/useNotes'
 import { useTasks } from '@/hooks/useTasks'
 import { PlusCircle, Sparkles, CalendarPlus, FileEdit } from 'lucide-react'
@@ -7,6 +8,7 @@ import { USE_MOCKS } from '@/lib/config'
 
 export default function QuickActions({ clientId }: { clientId: string }) {
   const [open, setOpen] = useState<string | null>(null)
+  const emailComposer = useEmailComposer()
   const { addNote } = useNotes(clientId)
   const tasks = useTasks()
 
@@ -18,6 +20,7 @@ export default function QuickActions({ clientId }: { clientId: string }) {
         <button className="panel-glass rounded-lg border border-white/50 py-2 inline-flex items-center justify-center gap-2 hover:shadow" onClick={() => setOpen('follow')}><Sparkles className="h-4 w-4" /> Generate Follow‑Up</button>
         <button className="panel-glass rounded-lg border border-white/50 py-2 inline-flex items-center justify-center gap-2 hover:shadow" onClick={() => setOpen('showing')}><CalendarPlus className="h-4 w-4" /> Schedule Showing</button>
         <button className="panel-glass rounded-lg border border-white/50 py-2 inline-flex items-center justify-center gap-2 hover:shadow" onClick={() => setOpen('amend')}><FileEdit className="h-4 w-4" /> Amend Contract</button>
+        <button className="panel-glass rounded-lg border border-white/50 py-2 inline-flex items-center justify-center gap-2 hover:shadow" onClick={() => emailComposer.set({ open: true })}><Sparkles className="h-4 w-4" /> Generate Email</button>
       </div>
 
     {open === 'note' && (

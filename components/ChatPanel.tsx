@@ -1,7 +1,7 @@
 "use client"
 import { motion, AnimatePresence } from 'framer-motion'
 import { useUI } from '@/store/ui'
-import { useState, useMemo, useRef, useEffect } from 'react'
+import { useState, useMemo, useRef, useEffect, useCallback } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import { useClient } from '@/hooks/useClient'
 import { useClients } from '@/hooks/useClients'
@@ -25,6 +25,8 @@ export default function ChatPanel() {
   const [messages, setMessages] = useState<Array<{ role: 'user'|'bot'; content: string; intent?: 'next'|'follow'|'status'|'market' }>>([
     { role: 'bot', content: 'Hi! Ask anything about a client or your tasks. I can draft follow-ups, summarize status, and more.' },
   ])
+  // Track hashes of notes saved per client to avoid duplicates in-session
+  const [savedNoteHashes, setSavedNoteHashes] = useState<Record<string, Set<string>>>({})
   const listRef = useRef<HTMLDivElement>(null)
   const [pickerOpen, setPickerOpen] = useState(false)
   const [fullScreen, setFullScreen] = useState(false)
@@ -198,11 +200,48 @@ export default function ChatPanel() {
                       className="mt-0.5 text-xs text-ink bg-white border border-default rounded-md px-2 py-1 hover:bg-surface-2"
                       onClick={async ()=>{
                         try {
-                          const res = await fetch('/api/sheets/append-note', { method: 'POST', body: JSON.stringify({ clientId: effectiveClientId, note: m.content }) })
-                          if (!res.ok) throw new Error(await res.text())
-                          setMessages(mm=>[...mm, { role: 'bot', content: 'Your note has been saved.' }])
+                          const clientId = effectiveClientId as string
+                          if(!clientId) return
+                          // Normalize & hash to prevent duplicates
+                          const cleaned = extractActionable(m.content)
+                          const hash = simpleHash(cleaned)
+                          setSavedNoteHashes(prev => {
+                            const next = { ...prev }
+                            if(!next[clientId]) next[clientId] = new Set()
+                            return next
+                          })
+                          const already = savedNoteHashes[clientId]?.has(hash)
+                          if(already){
+                            setMessages(mm=>[...mm, { role:'bot', content:'(Already saved, skipped duplicate.)' }])
+                            return
+                          }
+                          // Use existing inputted notes submit endpoint
+                          const res = await fetch('/api/notes/submit', {
+                            method: 'POST',
+                            headers: { 'Content-Type':'application/json', 'Accept':'application/json' },
+                            body: JSON.stringify({ clientId, text: cleaned })
+                          })
+                          const ct = res.headers.get('content-type') || ''
+                          if (!res.ok) {
+                            // If we got back HTML, treat as missing endpoint not a fatal error
+                            if (ct.includes('text/html')) {
+                              throw new Error('Save endpoint not available (received HTML).')
+                            }
+                            const errText = await res.text()
+                            throw new Error(errText || 'Failed to save')
+                          }
+                          setSavedNoteHashes(prev => {
+                            const next = { ...prev }
+                            const set = new Set(next[clientId] || [])
+                            set.add(hash)
+                            next[clientId] = set
+                            return next
+                          })
+                          // Minimal inline confirmation without clutter
+                          setMessages(mm=>[...mm, { role: 'bot', content: '(Note saved)' }])
                         } catch(e:any) {
-                          setMessages(mm=>[...mm, { role: 'bot', content: `Could not save note: ${e.message}` }])
+                          const msg = (e?.message || 'Failed to save').slice(0,200)
+                          setMessages(mm=>[...mm, { role: 'bot', content: `Could not save note: ${msg}` }])
                         }
                       }}
                       aria-label="Save this reply as a note"
@@ -327,6 +366,30 @@ function shouldSuggestSave(content: string, intent?: 'next'|'follow'|'status'|'m
   // Avoid offering on obvious errors
   if (c.startsWith('error:') || c.includes('could not')) return false
   return false
+}
+
+// Extract actionable portion of assistant reply: prefer bullet list / Next Steps section
+function extractActionable(raw: string): string {
+  let text = raw.trim()
+  // Remove trailing generic disclaimers (simple heuristic)
+  text = text.replace(/\n+please ensure[^]+$/i, '').trim()
+  // Look for Next Steps section
+  const nextIdx = text.toLowerCase().indexOf('next steps')
+  if(nextIdx !== -1){
+    text = text.slice(nextIdx)
+  }
+  // Keep only first 30 lines to avoid saving huge blocks
+  const lines = text.split(/\n+/).slice(0,30)
+  // If we have bullet lines, keep them; else keep entire trimmed
+  const bulletLines = lines.filter(l=>/^[-*•]/.test(l.trim()))
+  const result = bulletLines.length >= 2 ? bulletLines.join('\n') : lines.join('\n')
+  return result.trim().slice(0, 2000)
+}
+
+function simpleHash(str: string): string {
+  let h = 0, i = 0, len = str.length
+  while(i < len){ h = (h * 31 + str.charCodeAt(i++)) | 0 }
+  return h.toString(36)
 }
 
 // Inline scheduler removed per spec; scheduling lives in Snapshot modal
