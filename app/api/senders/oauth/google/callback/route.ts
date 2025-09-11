@@ -9,7 +9,10 @@ export async function GET(req: NextRequest) {
   if (!code) return NextResponse.json({ error: 'Missing code' }, { status: 400 })
 
   // Exchange code for tokens
-  const redirectUri = process.env.GOOGLE_OAUTH_REDIRECT_URI || `${process.env.NEXT_PUBLIC_APP_URL}/api/senders/oauth/google/callback`
+  // Use same dynamic origin approach as start route so port mismatches don't break token exchange
+  const origin = req.nextUrl?.origin
+  const dynamicRedirect = origin ? `${origin}/api/senders/oauth/google/callback` : undefined
+  const redirectUri = process.env.GOOGLE_OAUTH_REDIRECT_URI || dynamicRedirect || `${process.env.NEXT_PUBLIC_APP_URL}/api/senders/oauth/google/callback`
   const tokenBody = new URLSearchParams({
     code: code || '',
     client_id: process.env.GOOGLE_OAUTH_CLIENT_ID || '',
@@ -24,7 +27,7 @@ export async function GET(req: NextRequest) {
   })
   const tokenJson: any = await tokenRes.json()
   if (tokenJson?.error) {
-    console.warn('[oauth] token exchange failed', tokenRes.status, tokenJson)
+    console.warn('[oauth] token exchange failed', tokenRes.status, { tokenJson, redirectUri })
     return NextResponse.json({ error: tokenJson.error_description || tokenJson.error, detail: tokenJson }, { status: 400 })
   }
 
@@ -36,7 +39,7 @@ export async function GET(req: NextRequest) {
   const me: any = await meRes.json()
   const email: string | undefined = me?.email
   if (!email) {
-    console.warn('[oauth] userinfo failed', meRes.status, me)
+    console.warn('[oauth] userinfo failed', meRes.status, { me, redirectUri })
     return NextResponse.json({ error: 'Unable to determine user email', detail: me }, { status: 400 })
   }
 
