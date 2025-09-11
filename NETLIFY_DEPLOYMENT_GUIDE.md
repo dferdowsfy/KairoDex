@@ -55,6 +55,8 @@ NEXTAUTH_SECRET=your_nextauth_secret_here
 NODE_ENV=production
 ```
 
+> Tip: A production-ready example of these variables is provided in `.env.production.example` at the repo root — copy values from there when adding them to Netlify.
+
 ## 🏗️ Step 4: Deploy Your Site
 
 1. **Initial Deployment**:
