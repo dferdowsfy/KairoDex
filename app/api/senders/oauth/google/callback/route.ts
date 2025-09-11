@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-// use built-in fetch and URLSearchParams
 import { supabaseServer } from '@/lib/supabaseServer'
+import crypto from 'crypto'
 
 export async function GET(req: NextRequest) {
   const url = new URL(req.url)
@@ -36,9 +36,33 @@ export async function GET(req: NextRequest) {
   // Save sender row
   const supabase = supabaseServer()
   const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const upsert = await supabase.from('senders').upsert({ owner_id: user.id, email, method: 'oauth_google', verified: true, oauth_refresh_token: refresh_token, meta: { provider: 'google' } }, { onConflict: 'owner_id,email' }).select().single()
+  let userId = user?.id as string | undefined
+
+  if (!userId) {
+    // Attempt state-based fallback
+    try {
+      if (state) {
+        const parsed = JSON.parse(state)
+        if (parsed?.d && parsed?.s) {
+          const secret = process.env.OAUTH_STATE_SECRET || process.env.NEXTAUTH_SECRET || 'dev-secret'
+            const sigCheck = crypto.createHmac('sha256', secret).update(parsed.d).digest('hex')
+          if (sigCheck === parsed.s) {
+            const inner = JSON.parse(parsed.d)
+            if (inner?.uid) userId = inner.uid
+          } else {
+            console.warn('[oauth] state signature mismatch')
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[oauth] state parse error', (e as any)?.message)
+    }
+  }
+
+  if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+  const upsert = await supabase.from('senders').upsert({ owner_id: userId, email, method: 'oauth_google', verified: true, oauth_refresh_token: refresh_token, meta: { provider: 'google' } }, { onConflict: 'owner_id,email' }).select().single()
   if (upsert.error) return NextResponse.json({ error: upsert.error.message }, { status: 500 })
 
   // Redirect back to app sender management
