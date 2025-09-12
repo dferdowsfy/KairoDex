@@ -10,7 +10,7 @@ interface EmailSchedule {
   campaign_id: string
   client_id: string
   scheduled_at: string
-  status: 'pending' | 'sent' | 'failed' | 'cancelled'
+  status: 'scheduled' | 'sent' | 'cancelled'
   email_subject: string
   email_content: string
   recipient_email: string
@@ -103,9 +103,8 @@ export default function EmailDashboard() {
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'sent': return 'bg-green-100 text-green-800'
-      case 'pending': return 'bg-yellow-100 text-yellow-800'
-      case 'failed': return 'bg-red-100 text-red-800'
+  case 'sent': return 'bg-green-100 text-green-800'
+  case 'scheduled': return 'bg-yellow-100 text-yellow-800'
       case 'cancelled': return 'bg-gray-100 text-gray-800'
       default: return 'bg-blue-100 text-blue-800'
     }
@@ -113,11 +112,9 @@ export default function EmailDashboard() {
 
   const getStats = () => {
     const total = schedules.length
-    const sent = schedules.filter(s => s.status === 'sent').length
-    const pending = schedules.filter(s => s.status === 'pending').length
-    const failed = schedules.filter(s => s.status === 'failed').length
-    
-    return { total, sent, pending, failed }
+  const sent = schedules.filter(s => s.status === 'sent').length
+  const scheduled = schedules.filter(s => s.status === 'scheduled').length
+  return { total, sent, scheduled }
   }
 
   const stats = getStats()
@@ -146,12 +143,8 @@ export default function EmailDashboard() {
             <div className="text-sm text-gray-600">Sent</div>
           </div>
           <div className="bg-white p-6 rounded-lg shadow">
-            <div className="text-2xl font-bold text-yellow-600">{stats.pending}</div>
-            <div className="text-sm text-gray-600">Pending</div>
-          </div>
-          <div className="bg-white p-6 rounded-lg shadow">
-            <div className="text-2xl font-bold text-red-600">{stats.failed}</div>
-            <div className="text-sm text-gray-600">Failed</div>
+            <div className="text-2xl font-bold text-yellow-600">{stats.scheduled}</div>
+            <div className="text-sm text-gray-600">Scheduled</div>
           </div>
         </div>
 
@@ -190,9 +183,8 @@ export default function EmailDashboard() {
               className="border border-gray-300 rounded-md px-3 py-2"
             >
               <option value="all">All Status</option>
-              <option value="pending">Pending</option>
+              <option value="scheduled">Scheduled</option>
               <option value="sent">Sent</option>
-              <option value="failed">Failed</option>
               <option value="cancelled">Cancelled</option>
             </select>
           </div>

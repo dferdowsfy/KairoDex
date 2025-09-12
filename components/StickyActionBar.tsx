@@ -1,7 +1,7 @@
 "use client"
 import { useEffect, useState } from 'react'
 import { usePathname } from 'next/navigation'
-import { MessageCircle, Users, CheckSquare } from 'lucide-react'
+import { MessageCircle, Users, CheckSquare, Mail } from 'lucide-react'
 import { useUI } from '@/store/ui'
 import Link from 'next/link'
 import { createPortal } from 'react-dom'
@@ -32,10 +32,11 @@ export default function StickyActionBar() {
         }}
       >
         <div className="px-3 pb-[calc(env(safe-area-inset-bottom,0px)+10px)] pt-2">
-          <div className="rounded-2xl border border-slate-200 bg-white/95 backdrop-blur shadow-lg grid grid-cols-3 overflow-hidden">
+          <div className="rounded-2xl border border-slate-200 bg-white/95 backdrop-blur shadow-lg grid grid-cols-4 overflow-hidden">
           {(() => {
             const isHome = pathname === '/'
             const isActions = pathname?.startsWith('/actions')
+            const isEmails = pathname?.startsWith('/emails')
             const isChat = !!chatOpen
             const base = 'relative flex flex-col items-center justify-center py-3 text-xs transition-colors'
             const iconCls = (active: boolean) => `h-6 w-6 mb-0.5 ${active ? 'text-blue-600' : 'text-slate-600'}`
@@ -62,6 +63,11 @@ export default function StickyActionBar() {
                   <MessageCircle className={iconCls(isChat)} />
                   Chat
                 </button>
+                <Link href="/emails" className={`${base} ${textCls(!!isEmails)}`} aria-current={isEmails ? 'page' : undefined}>
+                  <Indicator active={!!isEmails} />
+                  <Mail className={iconCls(!!isEmails)} />
+                  Emails
+                </Link>
                 <Link href="/actions" className={`${base} ${textCls(!!isActions)}`} aria-current={isActions ? 'page' : undefined}>
                   <Indicator active={!!isActions} />
                   <CheckSquare className={iconCls(!!isActions)} />

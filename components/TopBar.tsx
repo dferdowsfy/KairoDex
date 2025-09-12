@@ -20,7 +20,8 @@ export function ClientsTopBar() {
   const activeClient = clients.find(c => c.id === (activeClientId || selectedClientId))
   // Show the pricing CTA only for non-authenticated users (public/marketing pages)
   // Never show pricing for authenticated users, regardless of the page they're on
-  const showPricing = !user
+  const isLanding = pathname === '/' || pathname === '/kairodex.html'
+  const showPricing = !user && isLanding
   const isActive = (href: string) => href === '/' ? pathname === '/' : (pathname?.startsWith(href) ?? false)
 
   // Close the dropdown on route changes
