@@ -10,24 +10,42 @@ import { getContractDisplayName, CONTRACT_CATEGORIES } from '@/lib/contractMappi
 import QuickTaskForm from '@/components/QuickTaskForm'
 import ReminderCadence from '@/components/ReminderCadence'
 import { useClient } from '@/hooks/useClient'
+import { Sparkles, SquarePen, CheckSquare } from 'lucide-react'
 
 type ActionKey = 'followup' | 'amend' | 'task' | 'reminder'
 
 const ALLOWED_STATES = ['MD', 'DC', 'VA'] as const
 
 function StickyActionButtons({ open, setOpen }: { open: ActionKey | null, setOpen: (k: ActionKey)=>void }) {
-  const Btn = ({ k, label }: { k: ActionKey, label: string }) => (
-    <button
-      onClick={() => setOpen(k)}
-      className={`px-4 py-3 rounded-2xl text-sm font-semibold shadow-sm transition-colors ${open === k ? 'bg-slate-900 text-white' : 'bg-white border border-slate-200 text-slate-900 hover:bg-slate-50'}`}
-    >{label}</button>
-  )
+  const items: { k: ActionKey; label: string; desc: string; icon: JSX.Element; bg: string; border: string; hover: string }[] = [
+    { k: 'followup', label: 'Generate Follow‑Up', desc: 'AI email or SMS draft', icon: <Sparkles className="h-7 w-7" />, bg: 'bg-amber-100/60', border: 'border-amber-300/60', hover: 'hover:bg-amber-200/70' },
+    { k: 'amend', label: 'Amend Contract', desc: 'Modify contract terms', icon: <SquarePen className="h-7 w-7" />, bg: 'bg-emerald-100/60', border: 'border-emerald-300/60', hover: 'hover:bg-emerald-200/70' },
+    { k: 'task', label: 'Create Task', desc: 'Quick todo for client', icon: <CheckSquare className="h-7 w-7" />, bg: 'bg-violet-100/60', border: 'border-violet-300/60', hover: 'hover:bg-violet-200/70' }
+  ]
   return (
     <div className="sticky top-[56px] md:top-[70px] z-20">
-      <div className="rounded-2xl border border-slate-200 bg-white/90 backdrop-blur px-3 py-2 flex flex-wrap gap-2">
-  <Btn k="followup" label="Generate Follow up" />
-  <Btn k="amend" label="Amend Contract" />
-  <Btn k="task" label="Create Task" />
+      <div className="rounded-3xl border border-slate-200 bg-white/85 backdrop-blur px-4 py-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          {items.map(it => {
+            const active = open === it.k
+            return (
+              <button
+                key={it.k}
+                onClick={() => setOpen(it.k)}
+                className={`group relative text-left rounded-3xl border ${it.border} ${it.bg} ${it.hover} transition-all p-6 h-44 flex flex-col justify-between shadow-sm ${active ? 'ring-2 ring-slate-900 bg-white !border-slate-400' : 'hover:shadow-md'}`}
+              >
+                <div className="flex items-start justify-between">
+                  <div className={`w-14 h-14 rounded-2xl grid place-items-center border text-slate-800 bg-white/80 backdrop-blur-sm ${active ? 'border-slate-300 shadow-md' : 'border-white/60 shadow'} transition-colors`}>{it.icon}</div>
+                </div>
+                <div className="mt-3">
+                  <div className="font-semibold text-slate-900 leading-snug text-[25pt] tracking-tight">{it.label}</div>
+                  <div className="text-sm sm:text-base text-slate-700 mt-2 font-medium">{it.desc}</div>
+                </div>
+                <span aria-hidden className="pointer-events-none absolute inset-0 rounded-3xl border border-transparent group-hover:border-slate-400" />
+              </button>
+            )
+          })}
+        </div>
       </div>
     </div>
   )
