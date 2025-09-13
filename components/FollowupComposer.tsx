@@ -12,23 +12,32 @@ export default function FollowupComposer() {
   const { selectedClientId, pushToast } = useUI()
   const { data: activeClient } = useClient((selectedClientId || '') as any)
   const { user } = useSessionUser()
-  const { data: noteItems = [], upsert } = useNoteItems(selectedClientId || undefined)
+  const { data: noteItems = [] } = useNoteItems(selectedClientId || undefined)
 
   // Core form state
   const [channel, setChannel] = useState<'email'|'sms'>('email')
   const [tone, setTone] = useState<'Professional'|'Friendly'|'Concise'>('Professional')
   const [subject, setSubject] = useState('Follow-up')
-  const [instruction, setInstruction] = useState('Draft a concise follow-up referencing relevant milestones and next steps. Avoid redundancy. Close with a clear call-to-action.')
+  const baseInstruction = 'Draft a concise follow-up referencing relevant milestones and next steps. Avoid redundancy. Close with a clear call-to-action.'
+  const personalizationPrompts = [
+    { key:'deadlines', label:'Deadlines', text:'Highlight any upcoming key dates (inspection, appraisal, closing) briefly.' },
+    { key:'nextsteps', label:'Next Steps', text:'List the immediate next steps with who owns each (buyer vs. us) in a friendly tone.' },
+    { key:'milestones', label:'Milestones', text:'Reference recent milestones we completed (e.g., offer acceptance, appraisal ordered).' },
+    { key:'market', label:'Market Update', text:'Add one sentence micro‑market insight (inventory or recent comp) to build credibility.' },
+    { key:'property', label:'Property Fit', text:'Tie one property preference back to what we are watching (price point, school district, feature).' },
+    { key:'financing', label:'Financing', text:'If applicable, remind them to confirm lending docs / rate lock status politely.' },
+    { key:'gratitude', label:'Appreciation', text:'Open with a warm appreciation line referencing their time/decisions so far.' },
+    { key:'cta', label:'Call to Reply', text:'Close with a single clear question that invites a 1‑line reply.' },
+    { key:'alt', label:'Availability', text:'Offer 2 short call windows (e.g., tomorrow 9:30a or 4:00p) for quick alignment.' },
+  ] as const
+  const [selectedPrompts, setSelectedPrompts] = useState<string[]>([])
+  const togglePrompt = (k:string) => setSelectedPrompts(p=> p.includes(k)? p.filter(x=>x!==k): [...p,k])
   const [draft, setDraft] = useState('')
   const [generating, setGenerating] = useState(false)
   const [scheduleMode, setScheduleMode] = useState<'now'|'later'|'tomorrow'|'custom'|'sequence'>('now')
   const [customWhen, setCustomWhen] = useState('')
 
-  // Include / Exclude notes
-  const initialTagged = useMemo(()=> (noteItems||[]).filter(i=> (i.tags||[]).includes('followup')).map(i=>i.id), [noteItems])
-  const [includeIds, setIncludeIds] = useState<string[]>(initialTagged)
-
-  // Derived structured context
+  // Derived structured context (auto‑includes all structured notes now)
   const contextData = useMemo(()=>{
     const deadlines = noteItems.filter(i=> ['deadline','inspection','appraisal','emd'].includes(i.kind) && i.date)
       .sort((a,b)=> (a.date||'').localeCompare(b.date||''))
@@ -47,38 +56,84 @@ export default function FollowupComposer() {
     return { deadlines, nextSteps, contacts, milestones }
   }, [noteItems])
 
-  const filteredContext = () => {
-    const inc = includeIds.length? includeIds : undefined
-    return {
-      deadlines: contextData.deadlines.filter(d=> !inc || inc.includes(d.id)),
-      next_steps: contextData.nextSteps.filter(n=> !inc || inc.includes(n.id)),
-      contacts: contextData.contacts,
-      milestones: contextData.milestones,
-    }
+  // Offsets for sequence mode (days)
+  const cadenceOptions = [2,7,14,30,60,90,120,150,180]
+  const cadenceLabels: Record<number,string> = {
+    2: '2 days',
+    7: '1 week',
+    14: '2 weeks',
+    30: '1 month',
+    60: '2 months',
+    90: '3 months',
+    120: '4 months',
+    150: '5 months',
+    180: '6 months',
   }
-
-  const handleToggleInclude = async (it: NoteItem) => {
-    setIncludeIds(prev => prev.includes(it.id)? prev.filter(id=>id!==it.id): [...prev, it.id])
-    // Persist followup tag
-    try {
-      const tags = new Set(it.tags || [])
-      if (!includeIds.includes(it.id)) tags.add('followup'); else tags.delete('followup')
-      await upsert.mutateAsync({ ...it, tags: Array.from(tags) })
-    } catch { /* silent */ }
-  }
+  // single-select (radio style) for cadence offset
+  const [sequenceOffsets, setSequenceOffsets] = useState<number[]>([2])
+  const toggleOffset = (d:number) => setSequenceOffsets([d])
 
   const canGenerate = !!selectedClientId && !generating
+
+  // Helper function to calculate and format schedule time
+  const getScheduleTime = () => {
+    if (scheduleMode === 'now') return 'immediately'
+    
+    let sendAt = new Date()
+    if (scheduleMode === 'later') {
+      const t = new Date()
+      t.setHours(17, 0, 0, 0)
+      if (t < new Date()) t.setDate(t.getDate() + 1)
+      sendAt = t
+    } else if (scheduleMode === 'tomorrow') {
+      const t = new Date()
+      t.setDate(t.getDate() + 1)
+      t.setHours(9, 0, 0, 0)
+      sendAt = t
+    } else if (scheduleMode === 'custom' && customWhen) {
+      sendAt = new Date(customWhen)
+    } else if (scheduleMode === 'sequence') {
+      if (sequenceOffsets.length === 0) return 'no times selected'
+      const times = sequenceOffsets.map(d => {
+        const when = new Date()
+        when.setDate(when.getDate() + d)
+        if (d !== 0) when.setHours(9, 0, 0, 0)
+        return when.toLocaleDateString('en-US', { 
+          weekday: 'short', 
+          month: 'short', 
+          day: 'numeric',
+          hour: d === 0 ? 'numeric' : 'numeric',
+          minute: d === 0 ? '2-digit' : '2-digit'
+        })
+      })
+      return times.join(', ')
+    }
+    
+    return sendAt.toLocaleDateString('en-US', { 
+      weekday: 'long', 
+      month: 'long', 
+      day: 'numeric', 
+      hour: 'numeric', 
+      minute: '2-digit'
+    })
+  }
+
+  const schedulePreview = getScheduleTime()
 
   async function generateDraft() {
     if (!selectedClientId) { pushToast({ type:'info', message:'Pick a client first.' }); return }
     setGenerating(true)
     try {
-      const ctx = filteredContext()
-      const payload = {
-        clientId: selectedClientId,
-        channel,
-        instruction: `Tone: ${tone}. Context JSON: ${JSON.stringify(ctx)}\n${instruction}`
+      const ctx = {
+        deadlines: contextData.deadlines,
+        next_steps: contextData.nextSteps,
+        contacts: contextData.contacts,
+        milestones: contextData.milestones,
       }
+  const promptMap: Record<string,string> = Object.fromEntries(personalizationPrompts.map(p=>[p.key,p.text]))
+  const extra = selectedPrompts.map(k=>promptMap[k]).filter(Boolean).join('\n')
+  const combinedInstruction = `Tone: ${tone}. Context JSON: ${JSON.stringify(ctx)}\n${baseInstruction}${extra? '\n'+extra:''}`
+  const payload = { clientId: selectedClientId, channel, instruction: combinedInstruction }
       const res = await fetch('/api/ai/followup', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(payload) })
       const json = await res.json(); if (!res.ok) throw new Error(json?.error || 'Failed')
       const displayName = user?.user_metadata?.full_name || user?.user_metadata?.name || user?.email?.split('@')[0] || 'Agent'
@@ -100,119 +155,152 @@ export default function FollowupComposer() {
     const displayName = user?.user_metadata?.full_name || user?.user_metadata?.name || user?.email?.split('@')[0] || 'Agent'
     const to: string[] = (activeClient as any)?.email && channel==='email' ? [(activeClient as any).email] : []
     if (channel==='email' && to.length===0) { pushToast({ type:'info', message:'Client missing email' }); return }
+    
+    // For "Send now", use the direct email sending endpoint
+    if (scheduleMode === 'now') {
+      try {
+        const payload = {
+          to,
+          subject,
+          bodyMd: cleanPlaceholders(draft, activeClient?.name || undefined, displayName),
+          clientId: selectedClientId,
+        }
+        
+        console.log('[followup] Sending email now via /api/email/send-now')
+        const res = await fetch('/api/email/send-now', { 
+          method: 'POST', 
+          headers: { 'Content-Type': 'application/json' }, 
+          body: JSON.stringify(payload) 
+        })
+        const json = await res.json()
+        
+        if (!res.ok) {
+          throw new Error(json?.error || 'Failed to send email')
+        }
+        
+        pushToast({ type: 'success', message: '✅ Email sent successfully and delivered immediately!' })
+        return
+      } catch (e: any) {
+        console.error('[followup] Send now error:', e)
+        pushToast({ type: 'error', message: e?.message || 'Failed to send email' })
+        return
+      }
+    }
+    
+    // For scheduling, use the original logic
     let sendAt = new Date()
     if (scheduleMode==='later') { const t = new Date(); t.setHours(17,0,0,0); if (t<new Date()) t.setDate(t.getDate()+1); sendAt=t }
     else if (scheduleMode==='tomorrow') { const t = new Date(); t.setDate(t.getDate()+1); t.setHours(9,0,0,0); sendAt=t }
     else if (scheduleMode==='custom') { if(!customWhen) { pushToast({ type:'info', message:'Pick date/time' }); return } sendAt=new Date(customWhen) }
+    
     const payload = {
-      client_id: selectedClientId,
-      to_recipients: to,
-      cc_recipients: [] as string[],
+      clientId: selectedClientId,
+      to: to,
       subject,
-      body_html: cleanPlaceholders(draft, activeClient?.name || undefined, displayName),
-      body_text: cleanPlaceholders(draft, activeClient?.name || undefined, displayName),
-      noteitem_ids: includeIds,
-      send_at: sendAt.toISOString(),
+      bodyMd: cleanPlaceholders(draft, activeClient?.name || undefined, displayName),
+      sendAt: sendAt.toISOString(),
     }
+    
     try {
-      const res = await fetch('/api/email/schedule', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(payload) })
-      const j = await res.json(); if(!res.ok) throw new Error(j?.error||'Schedule failed')
-      pushToast({ type:'success', message: scheduleMode==='now'? 'Sent / queued':'Scheduled' })
-    } catch(e:any) { pushToast({ type:'error', message: e?.message || 'Schedule failed' }) }
+      if (scheduleMode==='sequence') {
+        if (sequenceOffsets.length===0) { pushToast({ type:'info', message:'Pick at least one cadence point' }); return }
+        const base = new Date()
+        const scheduledEmails = []
+        for (const off of sequenceOffsets) {
+          const when = new Date(base)
+          when.setDate(when.getDate()+off)
+          // For offset 0 we send now; others schedule at 9am local
+          if (off!==0) { when.setHours(9,0,0,0) }
+          const seqPayload = { ...payload, sendAt: when.toISOString(), subject: off===0? subject : `${subject} (Follow‑Up ${off}d)` }
+          const res = await fetch('/api/email/schedule', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(seqPayload) })
+          const j = await res.json(); if(!res.ok) throw new Error(j?.error||`Failed at +${off}d`)
+          scheduledEmails.push(j.emailId)
+        }
+        pushToast({ type:'success', message:`✅ Successfully scheduled ${sequenceOffsets.length} emails in sequence` })
+      } else {
+        const res = await fetch('/api/email/schedule', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(payload) })
+        const j = await res.json(); if(!res.ok) throw new Error(j?.error||'Schedule failed')
+        
+        const scheduleTime = scheduleMode === 'later' ? 'today at 5:00 PM' 
+          : scheduleMode === 'tomorrow' ? 'tomorrow at 9:00 AM' 
+          : scheduleMode === 'custom' && customWhen ? new Date(customWhen).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' }) 
+          : 'the selected time'
+        
+        pushToast({ type:'success', message: `✅ Email successfully scheduled for ${scheduleTime}` })
+      }
+    } catch(e:any) { 
+      console.error('[followup] Schedule error:', e)
+      pushToast({ type:'error', message: `❌ Failed to schedule email: ${e?.message || 'Unknown error'}` }) 
+    }
   }
 
   return (
-    <section className="rounded-2xl border border-default bg-white p-5 mt-4 shadow-sm" aria-labelledby="followup_header">
-      <div className="flex flex-wrap gap-3 items-center justify-between">
-        <h2 id="followup_header" className="font-semibold text-lg text-ink">AI Follow‑Up Composer</h2>
-        <div className="text-xs text-muted">{activeClient? `Client: ${(activeClient as any)?.name || (activeClient as any)?.first_name || ''}`:'No client selected'}</div>
+    <section className="rounded-2xl border-2 border-slate-300 bg-white p-6 mt-4 shadow-sm" aria-labelledby="followup_header">
+      <div className="flex flex-wrap gap-4 items-end justify-between">
+        <div>
+          <h2 id="followup_header" className="font-semibold text-2xl md:text-3xl text-slate-900 tracking-tight">Follow‑Up Composer</h2>
+          <p className="mt-1 text-sm md:text-base text-slate-600">Generate a personalized client follow‑up using recent activity, milestones, and selected focus areas.</p>
+        </div>
+        <div className="text-xs md:text-sm font-medium text-slate-500">{activeClient? `Client: ${(activeClient as any)?.name || (activeClient as any)?.first_name || ''}`:'No client selected'}</div>
       </div>
 
       {/* Step 1: Configuration */}
       <fieldset className="mt-4 border rounded-xl p-4" aria-labelledby="cfg_legend">
-        <legend id="cfg_legend" className="px-1 text-sm font-medium text-ink">1. Configuration</legend>
+        <legend id="cfg_legend" className="px-1 text-sm font-semibold text-slate-800">1. Configuration</legend>
         <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <div className="flex flex-col gap-1">
             <label className="text-xs font-medium text-muted" htmlFor="fu_channel">Channel</label>
-            <select id="fu_channel" value={channel} onChange={e=>setChannel(e.target.value as any)} className="h-10 rounded-md border border-default px-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            <select id="fu_channel" value={channel} onChange={e=>setChannel(e.target.value as any)} className="h-10 rounded-md border-2 border-default px-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
               <option value="email">Email</option>
               <option value="sms">SMS</option>
             </select>
           </div>
           <div className="flex flex-col gap-1">
             <label className="text-xs font-medium text-muted" htmlFor="fu_tone">Tone</label>
-            <select id="fu_tone" value={tone} onChange={e=>setTone(e.target.value as any)} className="h-10 rounded-md border border-default px-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            <select id="fu_tone" value={tone} onChange={e=>setTone(e.target.value as any)} className="h-10 rounded-md border-2 border-default px-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
               {['Professional','Friendly','Concise'].map(t=> <option key={t}>{t}</option>)}
             </select>
           </div>
           <div className="flex flex-col gap-1">
             <label className="text-xs font-medium text-muted" htmlFor="fu_subject">Subject</label>
-            <input id="fu_subject" value={subject} onChange={e=>setSubject(e.target.value)} className="h-10 rounded-md border border-default px-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            <input id="fu_subject" value={subject} onChange={e=>setSubject(e.target.value)} className="h-10 rounded-md border-2 border-default px-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
           </div>
           <div className="flex flex-col gap-1">
             <label className="text-xs font-medium text-muted">Client</label>
-            <div className="h-10 rounded-md border border-default bg-surface-2 px-3 text-sm flex items-center">{(activeClient as any)?.name || '—'}</div>
+            <div className="h-10 rounded-md border-2 border-default bg-surface-2 px-3 text-sm flex items-center">{(activeClient as any)?.name || '—'}</div>
           </div>
         </div>
       </fieldset>
 
-      {/* Step 2: Include Notes */}
-      <fieldset className="mt-4 border rounded-xl p-4" aria-labelledby="notes_legend">
-        <legend id="notes_legend" className="px-1 text-sm font-medium text-ink">2. Select Context ({includeIds.length}/{noteItems.length})</legend>
-        {noteItems.length === 0 && <div className="text-xs text-muted">No structured notes yet. Generate or add some notes first.</div>}
-        {noteItems.length>0 && (
-          <ul className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2">
-            {noteItems.map(it => {
-              const active = includeIds.includes(it.id)
-              return (
-                <li key={it.id}>
-                  <button
-                    type="button"
-                    onClick={()=>handleToggleInclude(it)}
-                    aria-pressed={active}
-                    className={`w-full text-left rounded-lg border px-3 py-2 text-xs leading-snug transition relative ${active? 'bg-indigo-50 border-indigo-300 ring-1 ring-indigo-400':'bg-white border-default hover:border-indigo-300'} focus:outline-none focus:ring-2 focus:ring-indigo-500`}
-                  >
-                    <span className="font-medium text-ink block truncate">{it.title}</span>
-                    <span className="text-[10px] text-muted block">{it.kind}{it.date? ` • ${it.date.slice(0,10)}`:''}</span>
-                  </button>
-                </li>
-              )
-            })}
-          </ul>
-        )}
+  {/* Step 2 removed – context auto included */}
+
+      {/* Step 2 (new numbering): Personalization */}
+      <fieldset className="mt-6 border-2 rounded-2xl p-5" aria-labelledby="pers_legend">
+        <legend id="pers_legend" className="px-1 text-sm font-semibold text-slate-800">2. Personalize Focus</legend>
+        <p className="text-sm md:text-base text-slate-600 mb-4">Pick the details you want included, and we’ll make sure they flow naturally in the draft.</p>
+        <ul className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {personalizationPrompts.map(p=>{
+            const active = selectedPrompts.includes(p.key)
+            return (
+              <li key={p.key}>
+                <button
+                  type="button"
+                  onClick={()=>togglePrompt(p.key)}
+                  aria-pressed={active}
+                  className={`w-full text-left rounded-xl border-2 px-4 py-3 text-sm leading-snug transition font-semibold ${active? 'bg-blue-800 border-blue-700 text-white shadow-sm':'bg-blue-100/70 border-blue-400 text-blue-900 hover:bg-blue-200'} focus:outline-none focus:ring-2 focus:ring-blue-600/60`}
+                >
+                  <span className="block mb-1 text-[13px] tracking-tight">{p.label}</span>
+                  <span className={`block text-[11px] font-normal leading-snug ${active? 'text-blue-100':'text-blue-700/90'}`}>{p.text}</span>
+                </button>
+              </li>
+            )
+          })}
+        </ul>
       </fieldset>
 
-      {/* Step 3: Instruction */}
-      <fieldset className="mt-4 border rounded-xl p-4" aria-labelledby="inst_legend">
-        <legend id="inst_legend" className="px-1 text-sm font-medium text-ink">3. Instruction</legend>
-        <textarea
-          value={instruction}
-          onChange={e=>setInstruction(e.target.value)}
-          className="w-full min-h-[120px] rounded-md border border-default p-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-y"
-          placeholder="Add extra context or constraints"
-        />
-        <div className="mt-3 flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={()=> setInstruction(prev => prev + (prev.endsWith('\n')?'':'\n') + 'Highlight any upcoming deadlines succinctly.')}
-            className="text-[11px] px-2 py-1 rounded border border-default bg-surface hover:bg-surface-2"
-          >+ Deadlines</button>
-          <button
-            type="button"
-            onClick={()=> setInstruction(prev => prev + (prev.endsWith('\n')?'':'\n') + 'Keep under 130 words.')}
-            className="text-[11px] px-2 py-1 rounded border border-default bg-surface hover:bg-surface-2"
-          >+ Short</button>
-          <button
-            type="button"
-            onClick={()=> setInstruction(prev => prev + (prev.endsWith('\n')?'':'\n') + 'Close with a question inviting a quick reply.')}
-            className="text-[11px] px-2 py-1 rounded border border-default bg-surface hover:bg-surface-2"
-          >+ CTA</button>
-        </div>
-      </fieldset>
-
-      {/* Step 4: Generate & Preview */}
+      {/* Step 3: Generate & Preview */}
       <fieldset className="mt-4 border rounded-xl p-4" aria-labelledby="gen_legend">
-        <legend id="gen_legend" className="px-1 text-sm font-medium text-ink">4. Generate</legend>
+        <legend id="gen_legend" className="px-1 text-sm font-semibold text-slate-800">3. Generate</legend>
         <div className="flex items-center gap-3 flex-wrap">
           <button
             type="button"
@@ -244,38 +332,119 @@ export default function FollowupComposer() {
         </div>
       </fieldset>
 
-      {/* Step 5: Schedule (email only) */}
+    {/* Step 4: Schedule (email only) */}
       {channel==='email' && (
         <fieldset className="mt-4 border rounded-xl p-4" aria-labelledby="sched_legend">
-          <legend id="sched_legend" className="px-1 text-sm font-medium text-ink">5. Send / Schedule</legend>
-          <div className="grid md:grid-cols-3 gap-4">
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-muted" htmlFor="schedule_mode">Timing</label>
-              <select id="schedule_mode" value={scheduleMode} onChange={e=>setScheduleMode(e.target.value as any)} className="h-10 rounded-md border border-default px-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
-                <option value="now">Send now</option>
-                <option value="later">Later today (5pm)</option>
-                <option value="tomorrow">Tomorrow 9am</option>
-                <option value="custom">Custom</option>
-                <option value="sequence">Sequence (beta)</option>
-              </select>
+      <legend id="sched_legend" className="px-1 text-sm font-semibold text-slate-800">4. Send / Schedule</legend>
+          <div className="space-y-4">
+            <div className="flex flex-col gap-2">
+              <span className="text-xs font-medium text-muted">Timing</span>
+              <div className="flex flex-wrap gap-2">
+                {[
+                  { value:'now', label:'Send now' },
+                  { value:'later', label:'Later today (5pm)' },
+                  { value:'tomorrow', label:'Tomorrow 9am' },
+                  { value:'custom', label:'Custom' },
+                  { value:'sequence', label:'Sequence (beta)' },
+                ].map(opt => {
+                  const active = scheduleMode===opt.value
+                  return (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      aria-pressed={active}
+                      onClick={()=>setScheduleMode(opt.value as any)}
+                      className={`px-3 h-10 rounded-md text-xs font-medium border-2 transition ${active? 'bg-indigo-600 border-indigo-600 text-white shadow-sm':'border-indigo-300 text-indigo-800 bg-indigo-50 hover:bg-indigo-100'}`}
+                    >{opt.label}</button>
+                  )
+                })}
+              </div>
             </div>
-            {scheduleMode==='custom' && (
-              <div className="flex flex-col gap-1">
-                <label className="text-xs font-medium text-muted" htmlFor="custom_when">When</label>
-                <input id="custom_when" type="datetime-local" value={customWhen} onChange={e=>setCustomWhen(e.target.value)} className="h-10 rounded-md border border-default px-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+
+            {/* Schedule Preview */}
+            {draft && (
+              <div className="rounded-lg bg-blue-50 border border-blue-200 p-3">
+                <div className="flex items-start gap-2">
+                  <div className="text-blue-600 mt-0.5">
+                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />
+                    </svg>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-blue-900">
+                      {scheduleMode === 'now' 
+                        ? 'Email will be sent immediately'
+                        : scheduleMode === 'sequence'
+                        ? `Email sequence will be sent: ${schedulePreview}`
+                        : `Email will be sent on ${schedulePreview}`
+                      }
+                    </p>
+                    {scheduleMode !== 'now' && scheduleMode !== 'sequence' && (
+                      <p className="text-xs text-blue-700 mt-1">
+                        To: {(activeClient as any)?.email || 'No email address'}
+                      </p>
+                    )}
+                    {scheduleMode === 'sequence' && sequenceOffsets.length > 0 && (
+                      <p className="text-xs text-blue-700 mt-1">
+                        {sequenceOffsets.length} email{sequenceOffsets.length > 1 ? 's' : ''} scheduled
+                      </p>
+                    )}
+                  </div>
+                </div>
               </div>
             )}
-            <div className="flex items-end">
+
+            {scheduleMode==='custom' && (
+              <div className="flex flex-col gap-1 max-w-xs">
+                <label className="text-xs font-medium text-muted" htmlFor="custom_when">When</label>
+                <input id="custom_when" type="datetime-local" value={customWhen} onChange={e=>setCustomWhen(e.target.value)} className="h-10 rounded-md border-2 border-default px-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                {customWhen && (
+                  <p className="text-xs text-slate-600 mt-1">
+                    Will send on {new Date(customWhen).toLocaleDateString('en-US', { 
+                      weekday: 'long', 
+                      month: 'long', 
+                      day: 'numeric', 
+                      year: 'numeric',
+                      hour: 'numeric', 
+                      minute: '2-digit'
+                    })}
+                  </p>
+                )}
+              </div>
+            )}
+            
+            <div className="pt-1">
               <button
                 type="button"
-                disabled={!draft}
+                disabled={!draft || (scheduleMode === 'custom' && !customWhen) || (scheduleMode === 'sequence' && sequenceOffsets.length === 0)}
                 onClick={scheduleSend}
-                className={`h-10 w-full rounded-md text-sm font-medium text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 ${draft? 'bg-indigo-600 hover:bg-indigo-700':'bg-slate-400 cursor-not-allowed'}`}
-              >{scheduleMode==='now'? 'Send now':'Schedule'}</button>
+                className={`h-10 px-8 rounded-md text-sm font-medium text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
+                  draft && (scheduleMode !== 'custom' || customWhen) && (scheduleMode !== 'sequence' || sequenceOffsets.length > 0)
+                    ? 'bg-indigo-600 hover:bg-indigo-700'
+                    : 'bg-slate-400 cursor-not-allowed'
+                }`}
+              >{scheduleMode==='now'? 'Send now' : scheduleMode === 'sequence' ? `Schedule ${sequenceOffsets.length} emails` : 'Schedule email'}</button>
             </div>
           </div>
           {scheduleMode==='sequence' && (
-            <p className="mt-3 text-[11px] text-muted">Sequence mode will (future) create a follow-up series (0d, +2d, +7d). Currently only the first message is scheduled.</p>
+            <div className="mt-4 space-y-3">
+              <p className="text-base font-medium text-slate-700">Send follow‑up in:</p>
+              <div className="flex flex-wrap gap-2">
+                {cadenceOptions.map(d => {
+                  const active = sequenceOffsets.includes(d)
+                  return (
+                    <button
+                      key={d}
+                      type="button"
+                      aria-pressed={active}
+                      onClick={()=>toggleOffset(d)}
+                      className={`px-3 py-1.5 rounded-md text-xs font-medium border-2 transition ${active? 'bg-indigo-600 border-indigo-600 text-white shadow-sm':'border-indigo-300 text-indigo-800 bg-indigo-50 hover:bg-indigo-100'}`}
+                    >{cadenceLabels[d]}</button>
+                  )
+                })}
+              </div>
+              <p className="text-[10px] text-slate-500">Options range up to 6 months out.</p>
+            </div>
           )}
         </fieldset>
       )}

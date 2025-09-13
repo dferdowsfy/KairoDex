@@ -1,9 +1,13 @@
 "use client"
-import { useState } from 'react'
+import React, { useState, forwardRef, useImperativeHandle } from 'react'
 import { useTasks } from '@/hooks/useTasks'
 import { useUI } from '@/store/ui'
 
-export default function QuickTaskForm({ clientId, onCreated, onCancel }: { clientId?: string; onCreated?: () => void; onCancel?: () => void }) {
+export interface QuickTaskFormHandle { save: () => void }
+
+interface Props { clientId?: string; onCreated?: () => void; onCancel?: () => void; hideInternalActions?: boolean }
+
+const QuickTaskForm = forwardRef<QuickTaskFormHandle, Props>(function QuickTaskForm({ clientId, onCreated, onCancel, hideInternalActions }, ref) {
   const { create } = useTasks(clientId)
   const { pushToast } = useUI()
   const [title, setTitle] = useState('')
@@ -25,6 +29,8 @@ export default function QuickTaskForm({ clientId, onCreated, onCancel }: { clien
     } finally { setSaving(false) }
   }
 
+  useImperativeHandle(ref, () => ({ save }))
+
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-4">
       <div className="font-semibold text-slate-900 mb-2">New Task</div>
@@ -42,10 +48,15 @@ export default function QuickTaskForm({ clientId, onCreated, onCancel }: { clien
           className="w-full rounded-xl border border-slate-300 bg-white text-slate-900 px-3 py-2"
         />
       </div>
-      <div className="mt-3 flex gap-2">
-        <button onClick={save} disabled={saving} className="inline-flex items-center rounded-xl bg-slate-900 text-white px-4 py-2 min-h-[44px]">Save</button>
-        <button onClick={onCancel} className="inline-flex items-center rounded-xl border border-slate-300 text-slate-700 px-4 py-2 min-h-[44px] bg-white">Cancel</button>
-      </div>
+      {!hideInternalActions && (
+        <div className="mt-3 flex gap-2">
+          <button onClick={save} disabled={saving} className="inline-flex items-center rounded-xl bg-slate-900 text-white px-4 py-2 min-h-[44px]">Save</button>
+          <button onClick={onCancel} className="inline-flex items-center rounded-xl border border-slate-300 text-slate-700 px-4 py-2 min-h-[44px] bg-white">Cancel</button>
+        </div>
+      )}
     </div>
   )
-}
+})
+
+export default QuickTaskForm
+

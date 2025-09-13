@@ -1,5 +1,5 @@
 "use client"
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState, forwardRef, useImperativeHandle } from 'react'
 import { useUI } from '@/store/ui'
 import { useClient } from '@/hooks/useClient'
 import { US_STATES, getStateByCode } from '@/lib/us'
@@ -8,7 +8,9 @@ import { getContractDisplayName, CONTRACT_CATEGORIES } from '@/lib/contractMappi
 
 const ALLOWED_STATES = ['MD', 'DC', 'VA'] as const
 
-export default function AmendContractsPanel() {
+export interface AmendContractsPanelHandle { apply: () => Promise<boolean> }
+
+const AmendContractsPanel = forwardRef<AmendContractsPanelHandle>(function AmendContractsPanel(_, ref) {
   const { selectedClientId, pushToast } = useUI()
   const { data: activeClient } = useClient((selectedClientId || '') as any)
 
@@ -123,22 +125,39 @@ export default function AmendContractsPanel() {
     }
   }
 
-  const onApplyChanges = async () => {
-    if (!nlCommand.trim()) { pushToast({ type: 'info', message: 'Describe the changes to apply.' }); return }
-    if (!selectedTemplate && !selectedSupabaseContract) { pushToast({ type: 'info', message: 'Pick a contract first.' }); return }
-    if (!selectedClientId) { pushToast({ type: 'info', message: 'Pick a client first.' }); return }
+  const onApplyChanges = async (): Promise<boolean> => {
+    if (!nlCommand.trim()) { pushToast({ type: 'info', message: 'Describe the changes to apply.' }); return false }
+    if (!selectedTemplate && !selectedSupabaseContract) { pushToast({ type: 'info', message: 'Pick a contract first.' }); return false }
+    if (!selectedClientId) { pushToast({ type: 'info', message: 'Pick a client first.' }); return false }
     setApplyLoading(true)
     setApplyResult(null)
     try {
+      // Optimistic local adjustments (e.g., date change) so user sees something immediately
+      const dateInstr = nlCommand.match(/change\s+(the\s+)?(contract\s+)?date\s+(to|=)\s+([A-Za-z]+\s+\d{1,2},\s+\d{4})/i)
+      if (dateInstr && contractPreview) {
+        const newDate = dateInstr[4]
+        const firstDateRegex = /(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},\s+\d{4}/
+        if (!contractPreview.includes(newDate)) {
+          const locallyPatched = contractPreview.replace(firstDateRegex, newDate)
+          if (locallyPatched !== contractPreview) setContractPreview(locallyPatched)
+        }
+      }
       const useSb = selectedSupabaseContract || (selectedTemplate?.id?.startsWith('sb:'))
       const contractFileId = selectedSupabaseContract || (selectedTemplate?.id?.startsWith('sb:') ? selectedTemplate.id.replace('sb:', '') : null)
       if (useSb && contractFileId) {
-        const res = await fetch('/api/contracts/amend-storage', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contractFileId, naturalChanges: nlCommand, clientId: selectedClientId }) })
+  const res = await fetch('/api/contracts/amend-storage', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contractFileId, naturalChanges: nlCommand, clientId: selectedClientId, baseText: contractPreview || null }) })
         const json = await res.json(); if (!res.ok) throw new Error(json?.error || 'Failed to amend')
         // Show the actual amended contract text, not just a success message
         setApplyResult({ updated: json.amendedText || 'Contract amended successfully', summary: json.summary })
         if (json.amendedText) setContractPreview(json.amendedText)
-        if (json.updatedContractId) { await loadContractPreview(json.updatedContractId); setSelectedSupabaseContract(json.updatedContractId) }
+        // Keep the amended text visible; only update internal selection so future applies amend the new version
+        if (json.updatedContractId) { 
+          setSelectedSupabaseContract(json.updatedContractId)
+          // Update contractId to point to the new amended contract for consistent state
+          setContractId(`sb:${json.updatedContractId}`)
+          // Also load the preview from the new contract to ensure it's the amended version
+          await loadContractPreview(json.updatedContractId)
+        }
         // refresh
         const { supabase } = await import('@/lib/supabaseBrowser')
         let query = supabase.from('contract_files').select('*').eq('state_code', stateCode)
@@ -150,18 +169,23 @@ export default function AmendContractsPanel() {
         const res = await fetch('/api/contracts/apply', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contractTemplate: selectedTemplate.template, naturalChanges: nlCommand, clientContext }) })
         const json = await res.json(); if (!res.ok) throw new Error(json?.error || 'Failed to apply')
         setApplyResult({ updated: json.updated, summary: json.summary })
+        if (json.updated) setContractPreview(json.updated)
       } else {
         throw new Error('No valid contract selected')
       }
+  return true
     } catch (e:any) {
       alert(e?.message || 'Failed to apply changes')
+      return false
     } finally {
       setApplyLoading(false)
     }
   }
 
+  useImperativeHandle(ref, () => ({ apply: async () => await onApplyChanges() }))
+
   return (
-    <section className="rounded-2xl border border-slate-200 bg-white p-5 mt-3 space-y-3">
+    <section className="rounded-2xl border border-slate-200 bg-white p-5 mt-3 space-y-3 relative">
       <div className="flex items-center justify-between">
         <div className="font-semibold text-slate-900">Amend Contracts</div>
         {activeClient && (
@@ -234,66 +258,72 @@ export default function AmendContractsPanel() {
         </div>
       )}
 
-      {(selectedTemplate || selectedSupabaseContract) && (
-        <div className="space-y-3 mt-3">
-          <div className="contract-preview rounded-xl p-4 border border-slate-200 bg-slate-50 max-h-[60vh] overflow-auto">
-            <div className="text-sm font-semibold mb-2">Contract Preview</div>
-            {loadingPreview ? (
-              <div className="text-slate-600">Loading contract...</div>
-            ) : contractPreview ? (
-              <pre className="whitespace-pre-wrap text-slate-900">{contractPreview}</pre>
-            ) : selectedTemplate?.template ? (
-              <pre className="whitespace-pre-wrap text-slate-900">{selectedTemplate.template}</pre>
-            ) : (
-              <div className="text-slate-600">No preview available</div>
-            )}
-          </div>
-          <div>
-            <div className="text-sm text-ink/80 mb-2 font-semibold">Describe your changes</div>
-            <textarea className="w-full min-h-[120px] input-neon p-3 text-base text-black placeholder-black/70" value={nlCommand} onChange={e => setNlCommand(e.target.value)} placeholder="e.g., extend closing by 10 days; increase earnest money to $5,000; add inspection contingency." />
-          </div>
-          <div className="flex flex-wrap gap-2 items-center">
-            <button className={`px-4 py-2 rounded-lg text-white ${applyLoading ? 'bg-slate-400' : 'bg-slate-900 hover:opacity-95'}`} disabled={applyLoading || !nlCommand.trim()} onClick={onApplyChanges}>{applyLoading ? 'Applying…' : 'Apply changes'}</button>
-            <button className="px-4 py-2 rounded-lg border border-slate-200 bg-white text-slate-900" onClick={() => { setNlCommand(''); setApplyResult(null) }}>Reset</button>
-            {(contractPreview || selectedSupabaseContract) && (
-              <button
-                className={`px-4 py-2 rounded-lg text-white ${sendingDs ? 'bg-slate-500' : 'bg-red-700 hover:bg-red-800'}`}
-                disabled={sendingDs}
-                onClick={async () => {
-                  setDsError(null)
-                  setSendingDs(true)
-                  try {
-                    const payload: any = selectedSupabaseContract
-                      ? { contractId: selectedSupabaseContract }
-                      : { text: contractPreview || selectedTemplate?.template, name: selectedTemplate?.name || 'Contract' }
-                    const res = await fetch('/api/docusign/sender-view', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
-                    const json = await res.json()
-                    if (!res.ok) {
-                      if ((json?.error || '').toLowerCase().includes('consent')) {
-                        const c = await fetch('/api/docusign/consent')
-                        const j = await c.json()
-                        if (j?.url) window.open(j.url, '_blank', 'noopener')
-                        else throw new Error(json?.error || 'DocuSign consent required')
-                      } else {
-                        throw new Error(json?.error || `Failed to start DocuSign (${res.status})`)
+  {(selectedTemplate || selectedSupabaseContract) && (
+        <div className="mt-4">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 items-start">
+            {/* Preview Panel */}
+            <div className="contract-preview rounded-xl p-4 border border-slate-200 bg-slate-50 h-[65vh] overflow-auto order-2 lg:order-1">
+              <div className="text-sm font-semibold mb-2 sticky top-0 bg-slate-50/95 backdrop-blur-sm py-1">Contract Preview</div>
+              {loadingPreview ? (
+                <div className="text-red-700">Loading contract...</div>
+              ) : contractPreview ? (
+                <pre className="whitespace-pre-wrap text-slate-900">{contractPreview}</pre>
+              ) : selectedTemplate?.template ? (
+                <pre className="whitespace-pre-wrap text-slate-900">{selectedTemplate.template}</pre>
+              ) : (
+                <div className="text-slate-600">No preview available</div>
+              )}
+            </div>
+            {/* Describe Changes (Sticky) */}
+            <div className="flex flex-col gap-4 order-1 lg:order-2 lg:sticky lg:top-4">
+              <div>
+                <div className="text-sm text-ink/80 mb-2 font-semibold">Describe your changes</div>
+                <textarea className="w-full h-[28vh] lg:h-[32vh] input-neon p-3 text-base text-black placeholder-black/70 resize-vertical" value={nlCommand} onChange={e => setNlCommand(e.target.value)} placeholder="e.g., extend closing by 10 days; increase earnest money to $5,000; add inspection contingency." />
+              </div>
+              <div className="flex flex-wrap gap-2 items-center">
+                <button className={`px-4 py-2 rounded-lg text-white ${applyLoading ? 'bg-slate-400' : 'bg-slate-900 hover:opacity-95'}`} disabled={applyLoading || !nlCommand.trim()} onClick={onApplyChanges}>{applyLoading ? 'Applying…' : 'Apply changes'}</button>
+                <button className="px-4 py-2 rounded-lg border border-slate-200 bg-white text-slate-900" onClick={() => { setNlCommand(''); setApplyResult(null) }}>Reset</button>
+                {(contractPreview || selectedSupabaseContract) && (
+                  <button
+                    className={`px-4 py-2 rounded-lg text-white ${sendingDs ? 'bg-slate-500' : 'bg-red-700 hover:bg-red-800'}`}
+                    disabled={sendingDs}
+                    onClick={async () => {
+                      setDsError(null)
+                      setSendingDs(true)
+                      try {
+                        const payload: any = selectedSupabaseContract
+                          ? { contractId: selectedSupabaseContract }
+                          : { text: contractPreview || selectedTemplate?.template, name: selectedTemplate?.name || 'Contract' }
+                        const res = await fetch('/api/docusign/sender-view', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+                        const json = await res.json()
+                        if (!res.ok) {
+                          if ((json?.error || '').toLowerCase().includes('consent')) {
+                            const c = await fetch('/api/docusign/consent')
+                            const j = await c.json()
+                            if (j?.url) window.open(j.url, '_blank', 'noopener')
+                            else throw new Error(json?.error || 'DocuSign consent required')
+                          } else {
+                            throw new Error(json?.error || `Failed to start DocuSign (${res.status})`)
+                          }
+                        } else if (json?.url) {
+                          window.open(json.url, '_blank', 'noopener')
+                        }
+                      } catch (e:any) {
+                        setDsError(e?.message || 'DocuSign error')
+                      } finally {
+                        setSendingDs(false)
                       }
-                    } else if (json?.url) {
-                      window.open(json.url, '_blank', 'noopener')
-                    }
-                  } catch (e:any) {
-                    setDsError(e?.message || 'DocuSign error')
-                  } finally {
-                    setSendingDs(false)
-                  }
-                }}
-              >
-                {sendingDs ? 'Opening DocuSign…' : 'Send to DocuSign'}
-              </button>
-            )}
+                    }}
+                  >
+                    {sendingDs ? 'Opening DocuSign…' : 'Send to DocuSign'}
+                  </button>
+                )}
+              </div>
+              {dsError && (
+                <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded p-2">{dsError}</div>
+              )}
+            </div>
           </div>
-          {dsError && (
-            <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded p-2">{dsError}</div>
-          )}
         </div>
       )}
 
@@ -311,4 +341,6 @@ export default function AmendContractsPanel() {
       )}
     </section>
   )
-}
+})
+
+export default AmendContractsPanel

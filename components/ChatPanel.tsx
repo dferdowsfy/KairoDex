@@ -187,7 +187,7 @@ export default function ChatPanel() {
                 {/* Minimize removed per spec; collapse via center handle */}
               </div>
             </div>
-            <div ref={listRef} className="px-3 flex-1 overflow-auto space-y-2 py-3" style={{ WebkitOverflowScrolling: 'touch' as any }}>
+            <div ref={listRef} className="px-3 flex-1 overflow-auto space-y-2 py-3 pb-40" style={{ WebkitOverflowScrolling: 'touch' as any }}>
               {messages.map((m, i) => (
                 <div key={i} className="flex flex-col items-start gap-1">
                   {m.role === 'bot' ? (
@@ -252,7 +252,7 @@ export default function ChatPanel() {
               {loading && <BotBubble><TypingDots /></BotBubble>}
             </div>
             <form
-              className="p-3 border-t border-default bg-surface"
+              className="p-3 border-t border-default bg-surface md:relative md:bottom-0 md:left-0 md:right-0 fixed bottom-0 left-0 right-0 z-[61]"
               onSubmit={(e)=>{ e.preventDefault(); sendMessage() }}
             >
               {/* Starters row above the input; touch + mouse-drag scroll */}

@@ -60,56 +60,41 @@ export async function POST(req: NextRequest) {
     
     console.log('📁 Attempting to download from bucket:', bucket, 'path:', contractPath)
 
-    // Try to get text content - handle both text and PDF files, with fallback
+    // Select base text: prefer provided baseText (current preview) else amended_content else fallback scaffold
     let originalText: string
-    
-    // Always use fallback approach for now since storage files may not be accessible
-    console.log('📄 Using fallback contract content approach...')
-    originalText = `CONTRACT: ${originalContract.contract_name.toUpperCase()}
-
-REAL ESTATE CONTRACT DOCUMENT
-
-This is a legal contract document for real estate transactions.
-
-CONTRACT DETAILS:
-- Document: ${originalContract.contract_name}
-- State: ${originalContract.state_code}
-- County FIPS: ${originalContract.county_fips}
-- Status: ${originalContract.status}
-- Version: ${version}
-
-FINANCING TERMS:
-The buyer shall obtain financing in the form of a conventional loan in the amount of $360,000.00 
-with terms acceptable to the buyer. This contract is contingent upon buyer's ability to obtain 
-such financing within 30 days of the effective date.
-
-STANDARD CONTRACT TERMS:
-1. Purchase Price: $[TO BE DETERMINED]
-2. Earnest Money: $[TO BE DETERMINED]  
-3. Closing Date: [TO BE DETERMINED]
-4. Property Address: [TO BE DETERMINED]
-5. Property Inspection: Subject to satisfactory inspection
-6. Title Insurance: [TO BE DETERMINED]
-
-ADDITIONAL PROVISIONS:
-- All terms subject to applicable state and local laws
-- Contract governed by ${originalContract.state_code} state law
-- Standard real estate contract provisions apply
-
-This document represents the agreement between buyer and seller for the purchase of real property.
-
-EXECUTION:
-Buyer: _________________ Date: _________
-Seller: ________________ Date: _________`
+    if (body.baseText && typeof body.baseText === 'string' && body.baseText.length > 50) {
+      console.log('📄 Using client-provided baseText (preview)')
+      originalText = body.baseText
+    } else if (originalContract.metadata?.amended_content) {
+      console.log('📄 Using existing amended_content as base')
+      originalText = originalContract.metadata.amended_content
+    } else {
+      console.log('📄 Using fallback scaffold content')
+      originalText = `CONTRACT: ${originalContract.contract_name.toUpperCase()}
+\nThis is a legal contract document for real estate transactions.\nVersion: ${version}\nState: ${originalContract.state_code}\nCounty FIPS: ${originalContract.county_fips}\nStatus: ${originalContract.status}\n\nSECTION 1: Parties\nBuyer and Seller details here.\n\nSECTION 2: Terms\nPurchase price, earnest money, financing, closing date.\n\nSECTION 3: Contingencies\nInspection, financing, appraisal.\n\nSECTION 4: Additional Provisions\nStandard provisions and legal clauses.\n\nEXECUTION:\nBuyer: __________ Date: __________\nSeller: __________ Date: __________`
+    }
     
     console.log('✅ Contract text prepared, length:', originalText.length)
     
     // Apply AI changes
     console.log('🤖 Applying AI changes...')
-    const system = `You are a contracts editor. Apply requested changes to the provided contract text.
-- Show the UPDATED CONTRACT first, preserving formatting.
-- Then include a short SUMMARY of changes in bullet points.
-- If any detail is ambiguous, add [confirm] next to it.`
+  const system = `You are an expert real estate contracts editor.
+Apply EVERY requested change to the contract text precisely.
+
+STRICT RULES:
+1. Modify the ORIGINAL CONTRACT text directly; do NOT summarize instead of editing.
+2. If the user asks to "change date to X" or similar, locate the primary contract date (first date-like token such as 'September 12, 2025') and replace it with the new date exactly.
+3. Reflect each numeric or monetary change (earnest money, purchase price, extension days, etc.).
+4. If an instruction is ambiguous, insert [confirm] after the ambiguous portion but still attempt a best-effort edit.
+5. Preserve all sections and formatting not directly changed.
+6. Never remove parties or structural headers unless explicitly instructed.
+
+OUTPUT FORMAT:
+UPDATED CONTRACT
+<full amended contract text>
+
+SUMMARY
+<bullet list of applied changes>`
     
     const clientContext = clientId ? { clientId } : {}
     const user = `CLIENT_CONTEXT: ${JSON.stringify(clientContext)}
@@ -119,14 +104,39 @@ ${originalText}
 REQUESTED CHANGES (natural language):
 ${naturalChanges}`
     
+    // Helper: deterministic date replacement fallback
+    const extractRequestedDate = (instruction: string): string | null => {
+      const m = instruction.match(/change\s+(the\s+)?(contract\s+)?date\s+(to|=)\s+([A-Za-z]+\s+\d{1,2},\s+\d{4})/i)
+      return m ? m[4] : null
+    }
+    const firstDateRegex = /(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},\s+\d{4}/
+    const requestedDate = extractRequestedDate(naturalChanges || '')
+
     try {
       const result = await aiComplete(system, user)
       console.log('🤖 AI response received, length:', result.length)
-      
       // Heuristic split
       const parts = result.split(/\n\s*SUMMARY[:\-]?/i)
-      const updatedText = parts[0].trim()
+      let updatedText = parts[0].trim()
       const summary = parts[1]?.trim() || 'Contract successfully amended'
+
+      // If AI only returned a short patch / bullet list instead of full contract, merge into original
+      const tooShort = updatedText.length < 400 || updatedText.split(/\n/).length < 12
+      if (tooShort) {
+        console.log('⚠️ AI output appears to be a delta; performing merge fallback')
+        // Date substitution already handled below; here we append an AMENDMENTS section if not present
+        const amendedSectionHeader = '\n\nAMENDMENTS APPLIED (Merged):\n'
+        updatedText = originalText + amendedSectionHeader + updatedText
+      }
+
+      // Fallback: if user asked for date change & AI missed it, patch first occurrence
+      if (requestedDate) {
+        const originalFirstDate = originalText.match(firstDateRegex)?.[0]
+        const aiHasNew = updatedText.includes(requestedDate)
+        if (originalFirstDate && !aiHasNew) {
+          updatedText = updatedText.replace(firstDateRegex, requestedDate)
+        }
+      }
 
       // Create new amended contract file
       const newVersion = version + 1
@@ -200,7 +210,8 @@ ${naturalChanges}`
         summary,
         newPath,
         version: newVersion,
-        amendedText: updatedText
+        amendedText: updatedText,
+        appliedDeterministicDate: !!requestedDate
       }), { 
         status: 200, 
         headers: { 'Content-Type': 'application/json' } 

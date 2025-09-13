@@ -222,35 +222,40 @@ export default function Snapshot() {
   return (
     <section className="relative rounded-2xl border border-slate-200 bg-white p-5 space-y-4">
   {/* Left action rail removed per spec */}
-      <div className="flex items-start gap-2">
+  <div className="flex items-start gap-2">
         <div className="min-w-0">
           <div className="text-slate-900 font-semibold text-xl">Snapshot</div>
           <div className="text-2xl font-semibold text-slate-900 mt-1">{(client as any)?.name || [ (client as any)?.first_name, (client as any)?.last_name ].filter(Boolean).join(' ') || '—'}</div>
           <div className="mt-2 flex flex-wrap items-center gap-2">
             {/* Stage capsule */}
             {(client as any)?.stage && (
-              <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full border border-violet-200 bg-violet-50 text-violet-900 text-sm">
-                <span className="h-2 w-2 rounded-full bg-violet-400" aria-hidden="true" />
+              <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full border border-blue-500/30 bg-blue-600/10 text-blue-800 text-sm">
+                <span className="h-2 w-2 rounded-full bg-blue-500" aria-hidden="true" />
                 {(client as any)?.stage.replace(/_/g,' ')}
               </span>
             )}
             {/* Budget capsule */}
             {budget.label && budget.label !== '—' && (
-              <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full border border-amber-200 bg-amber-50 text-amber-900 text-sm">
-                <span className="h-2 w-2 rounded-full bg-amber-400" aria-hidden="true" />
+              <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full border border-blue-500/30 bg-blue-600/10 text-blue-800 text-sm">
+                <span className="h-2 w-2 rounded-full bg-blue-500" aria-hidden="true" />
                 Budget {budget.label}
               </span>
             )}
             {/* Move hint removed per spec */}
           </div>
         </div>
-        <div className="ml-auto flex items-center gap-2">
-          <button type="button" className="min-h-[40px] px-4 rounded-xl bg-slate-100 text-slate-900 border border-slate-200 text-sm" onClick={()=>{ if (DEBUG) console.log('Add Note opener clicked'); setAddOpen(true)}}>+ Add Note</button>
+        <div className="ml-auto flex items-center gap-3">
           <button
             type="button"
-            className="min-h-[40px] px-4 rounded-xl bg-slate-900 text-white text-sm"
-              onClick={()=>{ if (DEBUG) console.log('Generate Email opener clicked'); import('@/store/useEmailComposer').then(m=>m.useEmailComposer.getState().set({ open:true }))}}
-          >Generate Email</button>
+            className="group relative rounded-2xl border-2 border-blue-600/40 bg-blue-50 hover:bg-blue-100 transition-colors px-6 py-4 shadow-sm hover:shadow-md text-slate-900 font-medium text-base flex items-center gap-3"
+            onClick={()=>{ if (DEBUG) console.log('Add Note opener clicked'); setAddOpen(true)}}
+          >
+            <span className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-white border border-blue-200 shadow text-slate-700 text-lg font-semibold">+</span>
+            <span className="text-left leading-tight">
+              <span className="block text-lg font-semibold text-blue-900">Add Note</span>
+              <span className="block text-xs text-blue-700 font-normal">Quick client insight</span>
+            </span>
+          </button>
         </div>
       </div>
 
@@ -306,15 +311,15 @@ export default function Snapshot() {
 
       {/* Add Note modal */}
           {addOpen && (
-        <div role="dialog" aria-modal className="fixed inset-0 z-[9999] grid items-start justify-center pt-6 sm:pt-10 pointer-events-auto">
+        <div role="dialog" aria-modal className="fixed inset-0 z-[9999] grid place-items-center p-4 sm:p-6 pointer-events-auto">
           <div className="absolute inset-0 bg-black/30 z-[9998]" onClick={()=>{ if (DEBUG) console.log('Add Note backdrop clicked'); !addBusy && setAddOpen(false)}} />
-          <div className="relative z-[10000] w-[min(680px,95vw)] rounded-2xl bg-white border border-slate-200 shadow-xl p-5 pointer-events-auto">
-            <div className="text-xl font-semibold text-slate-900 mb-2">Add Notes</div>
-            <p className="text-sm text-slate-600 mb-3">Paste client notes. I’ll generate tiles for key dates, next steps, budget, and more.</p>
+          <div className="relative z-[10000] w-[min(680px,95vw)] max-h-[90vh] overflow-y-auto rounded-2xl bg-white border-2 border-blue-600/40 shadow-xl p-5 pointer-events-auto">
+            <div className="text-xl font-semibold text-blue-900 mb-2">Add Notes</div>
+            <p className="text-sm text-blue-800 mb-3">Paste client notes. We’ll structure key dates, next steps, budget and more.</p>
             <div className="mb-3 flex items-center gap-2">
-              <span className="text-sm text-slate-600">Client</span>
+              <span className="text-sm text-blue-800 font-medium">Client</span>
               <select
-                className="rounded-lg border border-slate-200 bg-white px-3 py-1 text-sm text-ink"
+                className="rounded-lg border border-blue-300 bg-white px-3 py-1 text-sm text-slate-900 focus:ring-2 focus:ring-blue-500/40"
                 value={addClientId}
                 onChange={(e)=>setAddClientId(e.target.value)}
               >
@@ -324,12 +329,12 @@ export default function Snapshot() {
                 ))}
               </select>
             </div>
-            <textarea value={addText} onChange={(e)=>setAddText(e.target.value)} className="w-full min-h-[160px] input-neon p-3 text-base" placeholder="Paste notes here…" />
+            <textarea value={addText} onChange={(e)=>setAddText(e.target.value)} className="w-full min-h-[160px] rounded-xl border-2 border-blue-200 focus:border-blue-400 focus:ring-2 focus:ring-blue-400/30 p-3 text-base bg-blue-50/50" placeholder="Paste notes here…" />
             <div className="mt-3 flex items-center gap-2 justify-end">
-              <button type="button" className="rounded-xl border border-slate-200 px-4 py-2" onClick={()=>setAddOpen(false)} disabled={addBusy}>Cancel</button>
-              <button type="button" className="rounded-xl bg-slate-900 text-white px-4 py-2 disabled:opacity-50 inline-flex items-center gap-2" onClick={handleParseNotes} disabled={!addText.trim() || addBusy || !addClientId}>
+              <button type="button" className="rounded-xl border-2 border-blue-300 px-4 py-2 text-blue-800 bg-white hover:bg-blue-50" onClick={()=>setAddOpen(false)} disabled={addBusy}>Cancel</button>
+              <button type="button" className="rounded-xl bg-blue-700 hover:bg-blue-800 text-white px-4 py-2 disabled:opacity-50 inline-flex items-center gap-2" onClick={handleParseNotes} disabled={!addText.trim() || addBusy || !addClientId}>
                 {addBusy && <Spinner className="h-4 w-4" />}
-                <span>{addBusy? 'Generating…':'Generate'}</span>
+                <span>{addBusy? 'Adding…':'Add'}</span>
               </button>
             </div>
           </div>
