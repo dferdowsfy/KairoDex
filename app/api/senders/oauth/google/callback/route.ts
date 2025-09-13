@@ -75,8 +75,46 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const upsert = await supabase.from('senders').upsert({ owner_id: userId, email, method: 'oauth_google', verified: true, oauth_refresh_token: refresh_token, meta: { provider: 'google' } }, { onConflict: 'owner_id,email' }).select().single()
-  if (upsert.error) return NextResponse.json({ error: upsert.error.message }, { status: 500 })
+  // First try to find existing sender
+  const { data: existingSender } = await supabase
+    .from('senders')
+    .select('*')
+    .eq('owner_id', userId)
+    .ilike('email', email)
+    .single()
+
+  let result
+  if (existingSender) {
+    // Update existing sender
+    result = await supabase
+      .from('senders')
+      .update({ 
+        method: 'oauth_google', 
+        verified: true, 
+        oauth_refresh_token: refresh_token, 
+        meta: { provider: 'google' },
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', existingSender.id)
+      .select()
+      .single()
+  } else {
+    // Insert new sender
+    result = await supabase
+      .from('senders')
+      .insert({ 
+        owner_id: userId, 
+        email: email.toLowerCase(), 
+        method: 'oauth_google', 
+        verified: true, 
+        oauth_refresh_token: refresh_token, 
+        meta: { provider: 'google' } 
+      })
+      .select()
+      .single()
+  }
+  
+  if (result.error) return NextResponse.json({ error: result.error.message }, { status: 500 })
 
   // Redirect back to app sender management
   return NextResponse.redirect(process.env.NEXT_PUBLIC_APP_URL || '/')

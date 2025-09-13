@@ -33,12 +33,11 @@ export default function ChatPanel() {
   const [loading, setLoading] = useState(false)
   const startersRef = useRef<HTMLDivElement>(null)
   const dragRef = useRef<{active: boolean; startX: number; scrollLeft: number}>({ active: false, startX: 0, scrollLeft: 0 })
-  // Mobile keyboard / viewport adjustments
+  // Mobile keyboard-aware state
   const formRef = useRef<HTMLFormElement>(null)
   const panelRef = useRef<HTMLDivElement>(null)
-  const [kbOffset, setKbOffset] = useState(0) // distance the virtual keyboard overlaps the visual viewport
-  const [inputHeight, setInputHeight] = useState(80)
-  const lastVV = useRef<{h:number; w:number}>({ h: 0, w: 0 })
+  const [keyboardHeight, setKeyboardHeight] = useState(0)
+  const [inputBarHeight, setInputBarHeight] = useState(56)
   const starters = [
     { key: 'next', label: 'Next steps', prompt: 'What are the next steps for this client?' },
   { key: 'follow', label: 'Follow up', prompt: 'Draft a brief follow-up using the client’s preferred contact method. If no preference, default to email.' },
@@ -70,57 +69,88 @@ export default function ChatPanel() {
 
   // Auto-scroll to bottom on new messages or when chat opens
   useEffect(() => {
-    requestAnimationFrame(() => listRef.current?.scrollTo({ top: 1e9, behavior: 'smooth' }))
+    if (listRef.current) {
+      listRef.current.scrollTop = listRef.current.scrollHeight
+    }
   }, [messages, chatOpen, loading])
 
-  // Track input (form) height
+  // Track input bar height
   useEffect(() => {
-    const updateHeights = () => {
-      if (formRef.current) setInputHeight(formRef.current.offsetHeight)
+    const updateInputHeight = () => {
+      if (formRef.current) setInputBarHeight(formRef.current.offsetHeight)
     }
-    updateHeights()
-    window.addEventListener('resize', updateHeights)
-    return () => window.removeEventListener('resize', updateHeights)
+    updateInputHeight()
+    window.addEventListener('resize', updateInputHeight)
+    return () => window.removeEventListener('resize', updateInputHeight)
   }, [])
 
-  // Mobile keyboard awareness via VisualViewport API (iOS Safari & modern Chrome)
+  // Mobile keyboard awareness via VisualViewport API
   useEffect(() => {
     if (!isMobile) return
-    let raf: number | null = null
-    const vv = typeof window !== 'undefined' ? (window.visualViewport || null) : null
-    const handle = () => {
-      if (!vv) return
-      // Compute keyboard overlap: portion of layout viewport hidden by the on-screen keyboard
+    
+    const vv = window.visualViewport
+    if (!vv) return
+
+    const handleViewportChange = () => {
+      // Calculate keyboard overlap: portion of layout viewport hidden by keyboard
       const overlap = Math.max(0, window.innerHeight - (vv.height + vv.offsetTop))
-      setKbOffset(overlap)
-      // Update panel height explicitly to avoid jumpy resize causing scroll flicker
-      if (panelRef.current) {
-        panelRef.current.style.setProperty('--kb-offset', overlap + 'px')
-      }
-      // Recalculate input height after changes
-      if (formRef.current) setInputHeight(formRef.current.offsetHeight)
-      // Auto scroll to latest message so it remains visible above keyboard
-      if (listRef.current) {
-        listRef.current.scrollTo({ top: listRef.current.scrollHeight, behavior: 'smooth' })
-      }
+      setKeyboardHeight(overlap)
+      
+      // Auto-scroll to bottom when keyboard state changes
+      requestAnimationFrame(() => {
+        if (listRef.current) {
+          listRef.current.scrollTop = listRef.current.scrollHeight
+        }
+      })
     }
-    const schedule = () => { if (raf) cancelAnimationFrame(raf); raf = requestAnimationFrame(handle) }
-    if (vv) {
-      vv.addEventListener('resize', schedule)
-      vv.addEventListener('scroll', schedule) // some browsers fire scroll when keyboard shown
-    }
-    window.addEventListener('orientationchange', schedule)
-    // Initial
-    handle()
+
+    vv.addEventListener('resize', handleViewportChange)
+    vv.addEventListener('scroll', handleViewportChange)
+    
+    // Initial measurement
+    handleViewportChange()
+
     return () => {
-      if (vv) {
-        vv.removeEventListener('resize', schedule)
-        vv.removeEventListener('scroll', schedule)
-      }
-      window.removeEventListener('orientationchange', schedule)
-      if (raf) cancelAnimationFrame(raf)
+      vv.removeEventListener('resize', handleViewportChange)
+      vv.removeEventListener('scroll', handleViewportChange)
     }
   }, [isMobile])
+
+  // Handle initial chat panel opening on mobile - anticipate keyboard
+  useEffect(() => {
+    if (!isMobile) return
+
+    if (!chatOpen) {
+      // Reset keyboard height when chat closes
+      setKeyboardHeight(0)
+      return
+    }
+
+    // Small delay to allow panel animation to start, then focus input properly
+    const timer = setTimeout(() => {
+      const input = formRef.current?.querySelector('input') as HTMLInputElement
+      if (input) {
+        // Pre-estimate keyboard height before focusing
+        setKeyboardHeight(300) // Reasonable initial estimate
+        
+        // Focus the input after setting up positioning
+        requestAnimationFrame(() => {
+          input.focus()
+          
+          // Refine keyboard height after visual viewport should detect actual keyboard
+          setTimeout(() => {
+            const vv = window.visualViewport
+            if (vv) {
+              const actualOverlap = Math.max(0, window.innerHeight - (vv.height + vv.offsetTop))
+              setKeyboardHeight(actualOverlap)
+            }
+          }, 300)
+        })
+      }
+    }, 200) // Allow animation to complete first
+
+    return () => clearTimeout(timer)
+  }, [chatOpen, isMobile])
 
   async function sendMessage() {
     const content = text.trim()
@@ -142,13 +172,18 @@ export default function ChatPanel() {
       setMessages(m => [...m, { role: 'bot', content: `Error: ${e.message || 'Failed to reach assistant'}` }])
     } finally {
   setLoading(false)
-      requestAnimationFrame(() => listRef.current?.scrollTo({ top: 1e9, behavior: 'smooth' }))
+      // Ensure scroll to bottom after message update
+      requestAnimationFrame(() => {
+        if (listRef.current) {
+          listRef.current.scrollTop = listRef.current.scrollHeight
+        }
+      })
     }
   }
   return (
     <AnimatePresence>
   {chatOpen && (
-  <motion.div
+          <motion.div
       id="gh-chat-panel"
           role="dialog"
       aria-label="AI Chat panel"
@@ -160,15 +195,21 @@ export default function ChatPanel() {
             fullScreen
               ? 'fixed inset-0 z-[70] w-full max-w-none'
               : isMobile
-                ? 'fixed z-[60] bottom-0 left-0 right-0 h-[90vh] w-full'
+                ? 'fixed z-[60] inset-0 w-full'
                 : 'fixed z-[60] inset-y-0 right-0 left-auto top-0 bottom-0 h-auto w-[380px] lg:w-[420px] xl:w-[460px]'
           }
+          style={isMobile ? { 
+            height: '100vh',
+            maxHeight: '100vh',
+            display: 'flex',
+            flexDirection: 'column'
+          } : undefined}
         >
           {/* Focus trap sentinels for mobile bottom sheet */}
           {isMobile && !fullScreen && (
             <button className="sr-only" onFocus={(e)=>{ const last = (e.currentTarget.parentElement?.querySelector('#chat-focus-end') as HTMLButtonElement|undefined); last?.focus() }} aria-hidden="true" />
           )}
-  <div ref={panelRef} className={`relative h-full overflow-visible ${fullScreen ? 'border-l border-default' : 'border-l border-default'} shadow-2xl flex flex-col`} style={{ background: 'var(--chat-bg)', backgroundColor: 'var(--chat-bg)' as any }}>
+  <div ref={panelRef} className={`relative h-full overflow-visible ${fullScreen ? 'border-l border-default' : 'border-l border-default'} shadow-2xl flex flex-col ${isMobile ? 'mobile-chat-container' : ''}`} style={{ background: 'var(--chat-bg)', backgroundColor: 'var(--chat-bg)' as any }}>
             {/* Center collapse handle (desktop only) */}
       {!isMobile && !fullScreen && (
               <button
@@ -244,11 +285,16 @@ export default function ChatPanel() {
             </div>
             <div
               ref={listRef}
-              className="px-3 flex-1 overflow-auto space-y-2 py-3"
-              style={{
+              className={isMobile ? "flex-1 overflow-auto px-3 py-3 space-y-2" : "px-3 flex-1 overflow-auto space-y-2 py-3"}
+              style={isMobile ? {
                 WebkitOverflowScrolling: 'touch' as any,
-                // Ensure space for input + keyboard offset; add extra cushion 16px
-                paddingBottom: (inputHeight + kbOffset + 16) + 'px'
+                paddingBottom: `${inputBarHeight + 20}px`,
+                height: `calc(100vh - ${inputBarHeight}px - 80px)`, // Account for header + input
+                minHeight: 0,
+                overflowY: 'auto' as const
+              } : {
+                WebkitOverflowScrolling: 'touch' as any,
+                paddingBottom: '2.5rem'
               }}
             >
               {messages.map((m, i) => (
@@ -316,12 +362,17 @@ export default function ChatPanel() {
             </div>
             <form
               ref={formRef}
-              className="p-3 border-t border-default bg-surface md:relative md:bottom-0 md:left-0 md:right-0 fixed left-0 right-0 z-[61]"
-              style={{
-                // Anchor just above keyboard (kbOffset already accounts for safe-area); add env(safe-area-inset-bottom)
-                bottom: isMobile ? `calc(${kbOffset}px + env(safe-area-inset-bottom, 0px))` : 0,
-                transition: 'bottom 120ms ease'
-              }}
+              className={isMobile 
+                ? "p-3 border-t border-default bg-white fixed left-0 right-0 z-[61] shadow-lg"
+                : "p-3 border-t border-default bg-surface"
+              }
+              style={isMobile ? {
+                bottom: keyboardHeight > 0 ? `${keyboardHeight}px` : 'env(safe-area-inset-bottom, 0px)',
+                transition: 'bottom 0.2s ease-out',
+                maxHeight: '120px',
+                overflow: 'visible',
+                paddingBottom: keyboardHeight > 0 ? '0px' : 'env(safe-area-inset-bottom, 0px)'
+              } : undefined}
               onSubmit={(e)=>{ e.preventDefault(); sendMessage() }}
             >
               {/* Starters row above the input; touch + mouse-drag scroll */}
@@ -364,7 +415,14 @@ export default function ChatPanel() {
                         .then(async res => { if (!res.ok) throw new Error(await res.text()); return res.json() })
                         .then(data => setMessages(m => [...m, { role: 'bot', content: data.reply || 'No reply', intent: s.key }]))
                         .catch(e => setMessages(m => [...m, { role: 'bot', content: `Error: ${e.message || 'Failed to reach assistant'}` }]))
-                        .finally(() => { setLoading(false); requestAnimationFrame(() => listRef.current?.scrollTo({ top: 1e9, behavior: 'smooth' })) })
+                        .finally(() => { 
+                          setLoading(false)
+                          requestAnimationFrame(() => {
+                            if (listRef.current) {
+                              listRef.current.scrollTop = listRef.current.scrollHeight
+                            }
+                          })
+                        })
                     }}
                     aria-label={`Starter: ${s.label}`}
                   >{s.label}</button>
@@ -376,7 +434,6 @@ export default function ChatPanel() {
                   onChange={(e)=>setText(e.target.value)}
                   placeholder="Send a message…"
                   className="w-full sm:flex-1 input-neon px-4 py-3 text-[1.125rem] sm:text-[1.25rem] leading-relaxed sf-text rounded-2xl sm:rounded-5xl"
-                  autoFocus={isMobile}
                 />
                 <button type="submit" className="w-full sm:w-auto inline-flex items-center justify-center rounded-2xl px-4 py-3 bg-primary text-white text-[1.05rem] sm:text-[1.1rem] font-medium shadow hover:opacity-95 min-h-[44px]">
                   <Send className="h-5 w-5" />

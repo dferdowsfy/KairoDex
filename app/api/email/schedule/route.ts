@@ -32,7 +32,15 @@ export async function POST(req: NextRequest) {
     if (e1) return NextResponse.json({ error: e1.message }, { status: 500 })
     const { error: e2 } = await supabase
       .from('email_jobs')
-      .insert({ email_id: email.id, send_at: sendAt })
+      .insert({ 
+        user_id: user.id,
+        client_id: clientId || user.id,
+        to_recipients: to,
+        subject,
+        body_html: bodyHtml,
+        send_at: sendAt,
+        status: 'scheduled'
+      })
   if (e2) return NextResponse.json({ error: e2.message }, { status: 500 })
   console.log('[email/schedule] queued job', { emailId: email.id, sendAt })
     return NextResponse.json({ emailId: email.id })

@@ -25,7 +25,7 @@ serve(async (req) => {
   const now = new Date().toISOString()
   // Transactional handling: select FOR UPDATE is not in supabase postgrest; we'll use simple safe updates with dedupe key checks
 
-  const { data: jobs, error } = await sb.from('email_jobs').select('*').eq('status', 'pending').lte('run_at', now).limit(50)
+  const { data: jobs, error } = await sb.from('email_jobs').select('*').eq('status', 'scheduled').lte('send_at', now).limit(50)
   if (error) return new Response(JSON.stringify({ error: error.message }), { status: 500 })
 
   for (const job of jobs as any[]) {
@@ -41,15 +41,23 @@ serve(async (req) => {
       }
 
       // Attempt to set to processing
-      const { error: lockErr } = await sb.from('email_jobs').update({ status: 'processing' }).eq('id', job.id).eq('status', 'pending')
+      const { error: lockErr } = await sb.from('email_jobs').update({ status: 'processing' }).eq('id', job.id).eq('status', 'scheduled')
       if (lockErr) {
         // someone else locked it
         continue
       }
 
-      // Read payload and send. Payload expected: { to, subject, html }
-      const payload = job.payload || {}
-      const sent = await sendEmailViaResend(payload.to, payload.subject, payload.html)
+      // Read email data from job fields directly
+      const to = job.to_recipients?.[0]
+      const subject = job.subject  
+      const html = job.body_html
+      
+      if (!to || !subject || !html) {
+        await sb.from('email_jobs').update({ status: 'failed', processed_at: new Date().toISOString(), error: 'Missing required fields' }).eq('id', job.id)
+        continue
+      }
+      
+      const sent = await sendEmailViaResend(to, subject, html)
 
       if (sent) {
         await sb.from('email_jobs').update({ status: 'processed', processed_at: new Date().toISOString() }).eq('id', job.id)

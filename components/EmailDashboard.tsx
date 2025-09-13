@@ -5,22 +5,30 @@ import { format } from 'date-fns'
 
 const fetcher = (url: string) => fetch(url).then(r => r.json())
 
-interface EmailSchedule {
+interface EmailRecord {
   id: string
-  campaign_id: string
-  client_id: string
-  scheduled_at: string
-  status: 'scheduled' | 'sent' | 'cancelled'
-  email_subject: string
-  email_content: string
+  type: 'sent' | 'scheduled'
   recipient_email: string
+  subject: string
+  status: 'sent' | 'scheduled' | 'failed' | 'cancelled'
+  scheduled_at: string
   sent_at?: string
-  error_message?: string
   created_at: string
-  clients?: {
-    name: string
-    company?: string
+  client_name: string
+  sender_email: string
+  sender_method: string
+  campaign_title?: string
+}
+
+interface EmailsResponse {
+  emails: EmailRecord[]
+  stats: {
+    total: number
+    sent: number
+    scheduled: number
+    failed: number
   }
+  total: number
 }
 
 interface EmailDeliveryLog {
@@ -50,12 +58,12 @@ interface EmailCampaign {
 }
 
 export default function EmailDashboard() {
-  const [activeTab, setActiveTab] = useState<'schedules' | 'campaigns' | 'logs'>('schedules')
+  const [activeTab, setActiveTab] = useState<'emails' | 'campaigns' | 'logs'>('emails')
   const [statusFilter, setStatusFilter] = useState<string>('all')
   
-  // Fetch email schedules
-  const { data: schedulesData, error: schedulesError, mutate: refetchSchedules } = useSWR(
-    '/api/email/schedules', 
+  // Fetch unified emails data
+  const { data: emailsData, error: emailsError, mutate: refetchEmails } = useSWR(
+    `/api/emails?status=${statusFilter}`, 
     fetcher
   )
   
@@ -71,13 +79,15 @@ export default function EmailDashboard() {
     fetcher
   )
 
-  const schedules: EmailSchedule[] = schedulesData?.schedules || []
+  const emailsResponse: EmailsResponse = emailsData || { emails: [], stats: { total: 0, sent: 0, scheduled: 0, failed: 0 }, total: 0 }
+  const emails: EmailRecord[] = emailsResponse.emails || []
+  const stats = emailsResponse.stats || { total: 0, sent: 0, scheduled: 0, failed: 0 }
   const campaigns: EmailCampaign[] = campaignsData?.campaigns || []
   const logs: EmailDeliveryLog[] = logsData?.logs || []
 
-  // Filter schedules by status
-  const filteredSchedules = schedules.filter(schedule => 
-    statusFilter === 'all' || schedule.status === statusFilter
+  // Filter emails by status (done on server side now, but keeping for client-side changes)
+  const filteredEmails = emails.filter(email => 
+    statusFilter === 'all' || email.status === statusFilter
   )
 
   // Process pending emails manually
@@ -92,7 +102,7 @@ export default function EmailDashboard() {
       
       if (response.ok) {
         alert(`Processed ${result.processed || 0} emails successfully!`)
-        refetchSchedules() // Refresh the data
+        refetchEmails() // Refresh the data
       } else {
         alert(`Error: ${result.error}`)
       }
@@ -103,21 +113,13 @@ export default function EmailDashboard() {
 
   const getStatusColor = (status: string) => {
     switch (status) {
-  case 'sent': return 'bg-green-100 text-green-800'
-  case 'scheduled': return 'bg-yellow-100 text-yellow-800'
+      case 'sent': return 'bg-green-100 text-green-800'
+      case 'scheduled': return 'bg-yellow-100 text-yellow-800'
       case 'cancelled': return 'bg-gray-100 text-gray-800'
+      case 'failed': return 'bg-red-100 text-red-800'
       default: return 'bg-blue-100 text-blue-800'
     }
   }
-
-  const getStats = () => {
-    const total = schedules.length
-  const sent = schedules.filter(s => s.status === 'sent').length
-  const scheduled = schedules.filter(s => s.status === 'scheduled').length
-  return { total, sent, scheduled }
-  }
-
-  const stats = getStats()
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
@@ -134,25 +136,49 @@ export default function EmailDashboard() {
 
         {/* Stats Cards */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-          <div className="bg-white p-6 rounded-lg shadow">
+          <button
+            onClick={() => setStatusFilter('all')}
+            className={`bg-white p-6 rounded-lg shadow hover:shadow-md transition-shadow text-left ${
+              statusFilter === 'all' ? 'ring-2 ring-blue-500' : ''
+            }`}
+          >
             <div className="text-2xl font-bold text-gray-900">{stats.total}</div>
             <div className="text-sm text-gray-600">Total Emails</div>
-          </div>
-          <div className="bg-white p-6 rounded-lg shadow">
+          </button>
+          <button
+            onClick={() => setStatusFilter('sent')}
+            className={`bg-white p-6 rounded-lg shadow hover:shadow-md transition-shadow text-left ${
+              statusFilter === 'sent' ? 'ring-2 ring-green-500' : ''
+            }`}
+          >
             <div className="text-2xl font-bold text-green-600">{stats.sent}</div>
             <div className="text-sm text-gray-600">Sent</div>
-          </div>
-          <div className="bg-white p-6 rounded-lg shadow">
+          </button>
+          <button
+            onClick={() => setStatusFilter('scheduled')}
+            className={`bg-white p-6 rounded-lg shadow hover:shadow-md transition-shadow text-left ${
+              statusFilter === 'scheduled' ? 'ring-2 ring-yellow-500' : ''
+            }`}
+          >
             <div className="text-2xl font-bold text-yellow-600">{stats.scheduled}</div>
             <div className="text-sm text-gray-600">Scheduled</div>
-          </div>
+          </button>
+          <button
+            onClick={() => setStatusFilter('failed')}
+            className={`bg-white p-6 rounded-lg shadow hover:shadow-md transition-shadow text-left ${
+              statusFilter === 'failed' ? 'ring-2 ring-red-500' : ''
+            }`}
+          >
+            <div className="text-2xl font-bold text-red-600">{stats.failed}</div>
+            <div className="text-sm text-gray-600">Failed</div>
+          </button>
         </div>
 
         {/* Tabs */}
         <div className="border-b border-gray-200">
           <nav className="-mb-px flex space-x-8">
             {[
-              { key: 'schedules', label: 'Email Schedules', count: schedules.length },
+              { key: 'emails', label: 'All Emails', count: emails.length },
               { key: 'campaigns', label: 'Campaigns', count: campaigns.length },
               { key: 'logs', label: 'Delivery Logs', count: logs.length }
             ].map(tab => (
@@ -173,18 +199,19 @@ export default function EmailDashboard() {
       </div>
 
       {/* Content based on active tab */}
-      {activeTab === 'schedules' && (
+      {activeTab === 'emails' && (
         <div>
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-semibold">Scheduled Emails</h2>
+            <h2 className="text-xl font-semibold">All Emails</h2>
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
               className="border border-gray-300 rounded-md px-3 py-2"
             >
               <option value="all">All Status</option>
-              <option value="scheduled">Scheduled</option>
               <option value="sent">Sent</option>
+              <option value="scheduled">Scheduled</option>
+              <option value="failed">Failed</option>
               <option value="cancelled">Cancelled</option>
             </select>
           </div>
@@ -200,53 +227,64 @@ export default function EmailDashboard() {
                     Subject
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Scheduled
+                    Scheduled/Sent
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Status
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Sent At
+                    Sender
                   </th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {filteredSchedules.map((schedule) => (
-                  <tr key={schedule.id} className="hover:bg-gray-50">
+                {filteredEmails.map((email) => (
+                  <tr key={email.id} className="hover:bg-gray-50">
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div>
                         <div className="text-sm font-medium text-gray-900">
-                          {schedule.recipient_email}
+                          {email.recipient_email}
                         </div>
                         <div className="text-sm text-gray-500">
-                          {schedule.clients?.name || 'Unknown Client'}
+                          {email.client_name}
                         </div>
                       </div>
                     </td>
                     <td className="px-6 py-4">
                       <div className="text-sm text-gray-900 max-w-xs truncate">
-                        {schedule.email_subject}
+                        {email.subject}
+                      </div>
+                      {email.campaign_title && (
+                        <div className="text-xs text-gray-500">
+                          Campaign: {email.campaign_title}
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      {format(new Date(email.scheduled_at), 'MMM d, yyyy h:mm a')}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getStatusColor(email.status)}`}>
+                        {email.status}
+                      </span>
+                      <div className="text-xs text-gray-500 mt-1">
+                        {email.type === 'sent' ? 'Immediate' : 'Scheduled'}
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {format(new Date(schedule.scheduled_at), 'MMM d, yyyy h:mm a')}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getStatusColor(schedule.status)}`}>
-                        {schedule.status}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {schedule.sent_at ? format(new Date(schedule.sent_at), 'MMM d, h:mm a') : '-'}
+                      <div className="text-sm text-gray-900">{email.sender_email}</div>
+                      <div className="text-xs text-gray-500">
+                        {email.sender_method === 'oauth_google' ? 'Gmail' : email.sender_method}
+                      </div>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
 
-            {filteredSchedules.length === 0 && (
+            {filteredEmails.length === 0 && (
               <div className="text-center py-8 text-gray-500">
-                No scheduled emails found
+                No emails found
               </div>
             )}
           </div>

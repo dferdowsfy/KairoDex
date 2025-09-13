@@ -1,5 +1,5 @@
 "use client"
-import React, { useMemo, useState } from 'react'
+import React, { useMemo, useState, useEffect } from 'react'
 import { sanitizeEmailBody, cleanPlaceholders } from '@/lib/emailSanitizer'
 import { useUI } from '@/store/ui'
 import { useClient } from '@/hooks/useClient'
@@ -18,6 +18,50 @@ export default function FollowupComposer() {
   const [channel, setChannel] = useState<'email'|'sms'>('email')
   const [tone, setTone] = useState<'Professional'|'Friendly'|'Concise'>('Professional')
   const [subject, setSubject] = useState('Follow-up')
+  
+  // Gmail sender integration
+  const [senders, setSenders] = useState<any[]>([])
+  const [selectedSenderId, setSelectedSenderId] = useState<string | null>(null)
+  const [loadingSenders, setLoadingSenders] = useState(false)
+
+  // Load Gmail senders on component mount
+  useEffect(() => {
+    if (channel === 'email') {
+      loadSenders()
+    }
+  }, [channel])
+
+  const loadSenders = async () => {
+    setLoadingSenders(true)
+    try {
+      const res = await fetch('/api/senders')
+      if (res.ok) {
+        const data = await res.json()
+        setSenders(data.senders || [])
+        // Auto-select first sender if available and none selected
+        if (data.senders?.length > 0 && !selectedSenderId) {
+          setSelectedSenderId(data.senders[0].id)
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load senders:', error)
+    } finally {
+      setLoadingSenders(false)
+    }
+  }
+
+  const handleConnectGmail = () => {
+    const popup = window.open('/api/senders/oauth/google/start', '_blank', 'width=500,height=600')
+    
+    // Poll for popup closure to refresh senders
+    const checkClosed = setInterval(() => {
+      if (popup?.closed) {
+        clearInterval(checkClosed)
+        // Refresh senders after OAuth completion
+        setTimeout(() => loadSenders(), 1000)
+      }
+    }, 1000)
+  }
   const baseInstruction = 'Draft a concise follow-up referencing relevant milestones and next steps. Avoid redundancy. Close with a clear call-to-action.'
   const personalizationPrompts = [
     { key:'deadlines', label:'Deadlines', text:'Highlight any upcoming key dates (inspection, appraisal, closing) briefly.' },
@@ -69,9 +113,11 @@ export default function FollowupComposer() {
     150: '5 months',
     180: '6 months',
   }
-  // single-select (radio style) for cadence offset
+  // Multi-select for cadence offsets in sequence mode
   const [sequenceOffsets, setSequenceOffsets] = useState<number[]>([2])
-  const toggleOffset = (d:number) => setSequenceOffsets([d])
+  const toggleOffset = (d:number) => setSequenceOffsets(prev => 
+    prev.includes(d) ? prev.filter(x => x !== d) : [...prev, d].sort((a, b) => a - b)
+  )
 
   const canGenerate = !!selectedClientId && !generating
 
@@ -164,6 +210,7 @@ export default function FollowupComposer() {
           subject,
           bodyMd: cleanPlaceholders(draft, activeClient?.name || undefined, displayName),
           clientId: selectedClientId,
+          senderId: selectedSenderId, // Use selected Gmail sender if available
         }
         
         console.log('[followup] Sending email now via /api/email/send-now')
@@ -178,7 +225,12 @@ export default function FollowupComposer() {
           throw new Error(json?.error || 'Failed to send email')
         }
         
-        pushToast({ type: 'success', message: '✅ Email sent successfully and delivered immediately!' })
+        pushToast({ type: 'success', message: '✅ Email sent successfully via Gmail! Check your sent folder.' })
+        
+        // Reset form after successful send
+        setDraft('')
+        setSubject('Follow-up')
+        setSelectedPrompts([])
         return
       } catch (e: any) {
         console.error('[followup] Send now error:', e)
@@ -199,6 +251,7 @@ export default function FollowupComposer() {
       subject,
       bodyMd: cleanPlaceholders(draft, activeClient?.name || undefined, displayName),
       sendAt: sendAt.toISOString(),
+      senderId: selectedSenderId, // Use selected Gmail sender if available
     }
     
     try {
@@ -206,17 +259,68 @@ export default function FollowupComposer() {
         if (sequenceOffsets.length===0) { pushToast({ type:'info', message:'Pick at least one cadence point' }); return }
         const base = new Date()
         const scheduledEmails = []
+        let emailsSent = 0
+        let emailsScheduled = 0
+        
         for (const off of sequenceOffsets) {
           const when = new Date(base)
           when.setDate(when.getDate()+off)
           // For offset 0 we send now; others schedule at 9am local
           if (off!==0) { when.setHours(9,0,0,0) }
-          const seqPayload = { ...payload, sendAt: when.toISOString(), subject: off===0? subject : `${subject} (Follow‑Up ${off}d)` }
-          const res = await fetch('/api/email/schedule', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(seqPayload) })
-          const j = await res.json(); if(!res.ok) throw new Error(j?.error||`Failed at +${off}d`)
-          scheduledEmails.push(j.emailId)
+          
+          const seqPayload = { 
+            ...payload, 
+            sendAt: when.toISOString(), 
+            subject: off===0? subject : `${subject} (Follow‑Up ${off}d)` 
+          }
+          
+          if (off === 0) {
+            // Send immediately for offset 0
+            const immediatePayload = {
+              to: payload.to,
+              subject: payload.subject,
+              bodyMd: payload.bodyMd,
+              clientId: payload.clientId,
+              senderId: selectedSenderId,
+            }
+            
+            const res = await fetch('/api/email/send-now', { 
+              method: 'POST', 
+              headers: { 'Content-Type': 'application/json' }, 
+              body: JSON.stringify(immediatePayload) 
+            })
+            const j = await res.json()
+            if(!res.ok) throw new Error(j?.error||`Failed to send immediate email`)
+            scheduledEmails.push(j.emailId)
+            emailsSent++
+          } else {
+            // Schedule for future
+            const res = await fetch('/api/email/schedule', { 
+              method:'POST', 
+              headers:{ 'Content-Type':'application/json' }, 
+              body: JSON.stringify(seqPayload) 
+            })
+            const j = await res.json()
+            if(!res.ok) throw new Error(j?.error||`Failed at +${off}d`)
+            scheduledEmails.push(j.emailId)
+            emailsScheduled++
+          }
         }
-        pushToast({ type:'success', message:`✅ Successfully scheduled ${sequenceOffsets.length} emails in sequence` })
+        
+        const sequenceMessage = []
+        if (emailsSent > 0) sequenceMessage.push(`${emailsSent} sent immediately`)
+        if (emailsScheduled > 0) sequenceMessage.push(`${emailsScheduled} scheduled`)
+        
+        pushToast({ 
+          type:'success', 
+          message:`✅ Email sequence created successfully! ${sequenceMessage.join(' and ')}. Check the Email Dashboard to track all emails.` 
+        })
+        
+        // Reset form after successful scheduling
+        setDraft('')
+        setSubject('Follow-up')
+        setSelectedPrompts([])
+        setSequenceOffsets([])
       } else {
         const res = await fetch('/api/email/schedule', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(payload) })
         const j = await res.json(); if(!res.ok) throw new Error(j?.error||'Schedule failed')
@@ -226,7 +330,12 @@ export default function FollowupComposer() {
           : scheduleMode === 'custom' && customWhen ? new Date(customWhen).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' }) 
           : 'the selected time'
         
-        pushToast({ type:'success', message: `✅ Email successfully scheduled for ${scheduleTime}` })
+        pushToast({ type:'success', message: `✅ Email successfully scheduled for ${scheduleTime}. Check the Email Dashboard to track it.` })
+        // Reset form after successful scheduling
+        setDraft('')
+        setSubject('Follow-up')
+        setSelectedPrompts([])
+        setCustomWhen('')
       }
     } catch(e:any) { 
       console.error('[followup] Schedule error:', e)
@@ -255,6 +364,50 @@ export default function FollowupComposer() {
               <option value="sms">SMS</option>
             </select>
           </div>
+          {channel === 'email' && (
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-muted" htmlFor="fu_sender">Sender</label>
+              <div className="flex gap-2">
+                {loadingSenders ? (
+                  <div className="flex-1 h-10 rounded-md border-2 border-default px-3 text-sm flex items-center text-slate-500">
+                    Loading...
+                  </div>
+                ) : senders.length > 0 ? (
+                  <>
+                    <select 
+                      id="fu_sender" 
+                      value={selectedSenderId || ''} 
+                      onChange={e => setSelectedSenderId(e.target.value || null)}
+                      className="flex-1 h-10 rounded-md border-2 border-default px-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    >
+                      <option value="">Default sender</option>
+                      {senders.map(sender => (
+                        <option key={sender.id} value={sender.id}>
+                          {sender.email} {sender.method === 'oauth_google' ? '(Gmail)' : ''}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={handleConnectGmail}
+                      className="px-3 h-10 rounded-md border-2 border-indigo-300 bg-indigo-50 text-indigo-700 text-xs font-medium hover:bg-indigo-100 transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      title="Add another Gmail account"
+                    >
+                      + Gmail
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleConnectGmail}
+                    className="flex-1 h-10 px-3 rounded-md border-2 border-indigo-500 bg-indigo-50 text-indigo-700 text-sm font-medium hover:bg-indigo-100 transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  >
+                    Connect Gmail
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
           <div className="flex flex-col gap-1">
             <label className="text-xs font-medium text-muted" htmlFor="fu_tone">Tone</label>
             <select id="fu_tone" value={tone} onChange={e=>setTone(e.target.value as any)} className="h-10 rounded-md border-2 border-default px-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">

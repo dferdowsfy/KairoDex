@@ -391,3 +391,37 @@ input::placeholder, textarea::placeholder { color: #94A3B8; }
   table { display: block; width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
   thead, tbody, tr { display: table; width: 100%; table-layout: fixed; }
 }
+
+/* Mobile Chat Support */
+@supports (height: 100dvh) {
+  .mobile-chat-container {
+    height: 100dvh;
+    max-height: 100dvh;
+  }
+}
+
+@supports not (height: 100dvh) {
+  .mobile-chat-container {
+    height: 100vh;
+    max-height: 100vh;
+  }
+}
+
+:root {
+  --input-bar-height: 80px;
+  --chat-gutter: 16px;
+  --mobile-keyboard-height: 0px;
+}
+
+/* Support for dvh units fallback */
+@supports not (height: 100dvh) {
+  .mobile-chat-container {
+    height: 100vh;
+  }
+}
+
+@supports (height: 100dvh) {
+  .mobile-chat-container {
+    height: 100dvh;
+  }
+}
