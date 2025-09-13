@@ -1,7 +1,7 @@
 "use client"
 import { motion, AnimatePresence } from 'framer-motion'
 import { useUI } from '@/store/ui'
-import { useState, useMemo, useRef, useEffect, useCallback } from 'react'
+import { useState, useMemo, useRef, useEffect } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import { useClient } from '@/hooks/useClient'
 import { useClients } from '@/hooks/useClients'
@@ -33,6 +33,12 @@ export default function ChatPanel() {
   const [loading, setLoading] = useState(false)
   const startersRef = useRef<HTMLDivElement>(null)
   const dragRef = useRef<{active: boolean; startX: number; scrollLeft: number}>({ active: false, startX: 0, scrollLeft: 0 })
+  // Mobile keyboard / viewport adjustments
+  const formRef = useRef<HTMLFormElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
+  const [kbOffset, setKbOffset] = useState(0) // distance the virtual keyboard overlaps the visual viewport
+  const [inputHeight, setInputHeight] = useState(80)
+  const lastVV = useRef<{h:number; w:number}>({ h: 0, w: 0 })
   const starters = [
     { key: 'next', label: 'Next steps', prompt: 'What are the next steps for this client?' },
   { key: 'follow', label: 'Follow up', prompt: 'Draft a brief follow-up using the client’s preferred contact method. If no preference, default to email.' },
@@ -67,6 +73,55 @@ export default function ChatPanel() {
     requestAnimationFrame(() => listRef.current?.scrollTo({ top: 1e9, behavior: 'smooth' }))
   }, [messages, chatOpen, loading])
 
+  // Track input (form) height
+  useEffect(() => {
+    const updateHeights = () => {
+      if (formRef.current) setInputHeight(formRef.current.offsetHeight)
+    }
+    updateHeights()
+    window.addEventListener('resize', updateHeights)
+    return () => window.removeEventListener('resize', updateHeights)
+  }, [])
+
+  // Mobile keyboard awareness via VisualViewport API (iOS Safari & modern Chrome)
+  useEffect(() => {
+    if (!isMobile) return
+    let raf: number | null = null
+    const vv = typeof window !== 'undefined' ? (window.visualViewport || null) : null
+    const handle = () => {
+      if (!vv) return
+      // Compute keyboard overlap: portion of layout viewport hidden by the on-screen keyboard
+      const overlap = Math.max(0, window.innerHeight - (vv.height + vv.offsetTop))
+      setKbOffset(overlap)
+      // Update panel height explicitly to avoid jumpy resize causing scroll flicker
+      if (panelRef.current) {
+        panelRef.current.style.setProperty('--kb-offset', overlap + 'px')
+      }
+      // Recalculate input height after changes
+      if (formRef.current) setInputHeight(formRef.current.offsetHeight)
+      // Auto scroll to latest message so it remains visible above keyboard
+      if (listRef.current) {
+        listRef.current.scrollTo({ top: listRef.current.scrollHeight, behavior: 'smooth' })
+      }
+    }
+    const schedule = () => { if (raf) cancelAnimationFrame(raf); raf = requestAnimationFrame(handle) }
+    if (vv) {
+      vv.addEventListener('resize', schedule)
+      vv.addEventListener('scroll', schedule) // some browsers fire scroll when keyboard shown
+    }
+    window.addEventListener('orientationchange', schedule)
+    // Initial
+    handle()
+    return () => {
+      if (vv) {
+        vv.removeEventListener('resize', schedule)
+        vv.removeEventListener('scroll', schedule)
+      }
+      window.removeEventListener('orientationchange', schedule)
+      if (raf) cancelAnimationFrame(raf)
+    }
+  }, [isMobile])
+
   async function sendMessage() {
     const content = text.trim()
     if (!content) return
@@ -93,7 +148,7 @@ export default function ChatPanel() {
   return (
     <AnimatePresence>
   {chatOpen && (
-        <motion.div
+  <motion.div
       id="gh-chat-panel"
           role="dialog"
       aria-label="AI Chat panel"
@@ -113,7 +168,7 @@ export default function ChatPanel() {
           {isMobile && !fullScreen && (
             <button className="sr-only" onFocus={(e)=>{ const last = (e.currentTarget.parentElement?.querySelector('#chat-focus-end') as HTMLButtonElement|undefined); last?.focus() }} aria-hidden="true" />
           )}
-  <div className={`relative h-full overflow-visible ${fullScreen ? 'border-l border-default' : 'border-l border-default'} shadow-2xl flex flex-col`} style={{ background: 'var(--chat-bg)', backgroundColor: 'var(--chat-bg)' as any }}>
+  <div ref={panelRef} className={`relative h-full overflow-visible ${fullScreen ? 'border-l border-default' : 'border-l border-default'} shadow-2xl flex flex-col`} style={{ background: 'var(--chat-bg)', backgroundColor: 'var(--chat-bg)' as any }}>
             {/* Center collapse handle (desktop only) */}
       {!isMobile && !fullScreen && (
               <button
@@ -187,7 +242,15 @@ export default function ChatPanel() {
                 {/* Minimize removed per spec; collapse via center handle */}
               </div>
             </div>
-            <div ref={listRef} className="px-3 flex-1 overflow-auto space-y-2 py-3 pb-40" style={{ WebkitOverflowScrolling: 'touch' as any }}>
+            <div
+              ref={listRef}
+              className="px-3 flex-1 overflow-auto space-y-2 py-3"
+              style={{
+                WebkitOverflowScrolling: 'touch' as any,
+                // Ensure space for input + keyboard offset; add extra cushion 16px
+                paddingBottom: (inputHeight + kbOffset + 16) + 'px'
+              }}
+            >
               {messages.map((m, i) => (
                 <div key={i} className="flex flex-col items-start gap-1">
                   {m.role === 'bot' ? (
@@ -252,7 +315,13 @@ export default function ChatPanel() {
               {loading && <BotBubble><TypingDots /></BotBubble>}
             </div>
             <form
-              className="p-3 border-t border-default bg-surface md:relative md:bottom-0 md:left-0 md:right-0 fixed bottom-0 left-0 right-0 z-[61]"
+              ref={formRef}
+              className="p-3 border-t border-default bg-surface md:relative md:bottom-0 md:left-0 md:right-0 fixed left-0 right-0 z-[61]"
+              style={{
+                // Anchor just above keyboard (kbOffset already accounts for safe-area); add env(safe-area-inset-bottom)
+                bottom: isMobile ? `calc(${kbOffset}px + env(safe-area-inset-bottom, 0px))` : 0,
+                transition: 'bottom 120ms ease'
+              }}
               onSubmit={(e)=>{ e.preventDefault(); sendMessage() }}
             >
               {/* Starters row above the input; touch + mouse-drag scroll */}
