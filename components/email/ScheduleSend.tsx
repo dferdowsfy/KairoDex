@@ -2,6 +2,7 @@
 import React, { useState, useMemo, useEffect } from 'react'
 import { useClient } from '@/hooks/useClient'
 import { useEmailComposer, EmailCadence } from '@/store/useEmailComposer'
+import { useUI } from '@/store/ui'
 import { cn } from '@/lib/utils'
 
 // Lightweight primitives (replace with shadcn/ui if already installed in project)
@@ -16,6 +17,7 @@ interface Props {
 
 export default function ScheduleSend({ trigger, onSaved, clientId }: Props) {
   const store = useEmailComposer()
+  const { pushToast } = useUI()
   // Load client to derive recipient email
   const { data: client } = useClient(clientId || '')
   const [mode, setMode] = useState<'quick'|'custom'>('quick')
@@ -107,17 +109,19 @@ export default function ScheduleSend({ trigger, onSaved, clientId }: Props) {
   const res = await fetch('/api/email/send', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(sendBody) })
         const jr = await res.json().catch(()=>null)
         if (!res.ok) throw new Error(jr?.error || 'Failed to send')
+        pushToast({ type: 'success', message: 'Email sent successfully!' })
       } else {
         // Schedule for later
         const res = await fetch('/api/email/schedule', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) })
         const jr = await res.json().catch(()=>null)
         if (!res.ok) throw new Error(jr?.error || 'Failed to schedule')
+        pushToast({ type: 'success', message: 'Email scheduled successfully!' })
       }
       store.reset()
       onSaved?.()
     } catch(e:any){
       console.error(e)
-      alert(e.message || 'Failed')
+      pushToast({ type: 'error', message: e?.message || 'Failed to send email' })
     } finally { setBusy(false) }
   }
 
@@ -239,6 +243,7 @@ export default function ScheduleSend({ trigger, onSaved, clientId }: Props) {
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-medium text-neutral-600">Body</label>
                   <div className="flex items-center gap-2">
+                    <span className="text-xs text-neutral-500">✏️ Editable</span>
                     <select value={tone} onChange={e=> setTone(e.target.value as any)} className="h-8 rounded-md border-2 border-black bg-white px-2 text-xs focus:outline-none">
                       <option value="professional">professional</option>
                       <option value="casual">casual</option>
@@ -254,7 +259,7 @@ export default function ScheduleSend({ trigger, onSaved, clientId }: Props) {
                     </button>
                   </div>
                 </div>
-                <textarea className="w-full rounded-md border-2 border-black p-3 text-sm h-64 min-h-[16rem] resize-y bg-neutral-50 focus:bg-neutral-50 focus:outline-none focus:ring-2 focus:ring-black/40" value={draftBody} onChange={e=>{ setDraftBody(e.target.value); store.set({ body: e.target.value }) }} placeholder="Body markdown..." />
+                <textarea className="w-full rounded-md border-2 border-black p-3 text-sm h-64 min-h-[16rem] resize-y bg-neutral-50 focus:bg-neutral-50 focus:outline-none focus:ring-2 focus:ring-black/40" value={draftBody} onChange={e=>{ setDraftBody(e.target.value); store.set({ body: e.target.value }) }} placeholder="Edit your generated email content here..." />
               </div>
               {/* Quick grid */}
               <div className="grid grid-cols-2 gap-2">

@@ -104,16 +104,16 @@ export default function HomePage() {
                 <button
                 key={item.k}
                 onClick={(ev)=> item.k === 'chat' ? setChatOpen(true) : onAction(item.k as any, ev)}
-                className={`group relative text-left rounded-3xl border-2 ${item.border} ${item.bg} ${item.hover} transition-colors p-6 flex flex-col gap-4 shadow-sm hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500/40 min-h-[12rem]`}
+                className={`group relative text-left rounded-3xl border-2 ${item.border} ${item.bg} ${item.hover} transition-colors p-4 sm:p-5 lg:p-6 flex flex-col gap-3 sm:gap-4 shadow-sm hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500/40 min-h-[10rem] sm:min-h-[11rem] lg:min-h-[12rem] overflow-hidden`}
               >
-                <div className="flex items-start justify-between">
-                  <div className="w-14 h-14 rounded-2xl grid place-items-center border-2 border-white/70 text-slate-800 bg-white/90 backdrop-blur-sm shadow transition-colors">
+                <div className="flex items-start justify-between shrink-0">
+                  <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl grid place-items-center border-2 border-white/70 text-slate-800 bg-white/90 backdrop-blur-sm shadow transition-colors">
                     {item.icon}
                   </div>
                 </div>
-                <div className="flex-1 flex flex-col">
-                  <div className="font-semibold text-slate-900 leading-tight tracking-tight break-words text-[clamp(18pt,4.2vw,22pt)] line-clamp-3">{item.label}</div>
-                  <div className="mt-2 font-medium text-lg sm:text-xl leading-snug text-slate-700 break-words whitespace-normal line-clamp-3">{item.desc}</div>
+                <div className="flex-1 flex flex-col justify-between min-h-0">
+                  <div className="font-semibold text-slate-900 leading-tight tracking-tight break-words text-sm sm:text-base md:text-lg lg:text-base xl:text-lg line-clamp-2 overflow-hidden">{item.label}</div>
+                  <div className="mt-1 sm:mt-2 font-medium text-xs sm:text-sm md:text-base lg:text-sm xl:text-base leading-snug text-slate-700 break-words whitespace-normal line-clamp-2 overflow-hidden">{item.desc}</div>
                 </div>
                 <span aria-hidden className="pointer-events-none absolute inset-0 rounded-3xl border border-transparent group-hover:border-slate-400" />
               </button>
@@ -169,7 +169,10 @@ export default function HomePage() {
       </>
     )}
   >
-    <FollowupComposer />
+    <FollowupComposer 
+      onGmailConnected={() => setActiveModal(null)} 
+      onSendComplete={() => setActiveModal(null)} 
+    />
   </Modal>
   <Modal
     isOpen={activeModal==='amend'}

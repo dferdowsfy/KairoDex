@@ -1,5 +1,5 @@
 "use client"
-import React, { useMemo, useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import { sanitizeEmailBody, cleanPlaceholders } from '@/lib/emailSanitizer'
 import { useUI } from '@/store/ui'
 import { useClient } from '@/hooks/useClient'
@@ -8,7 +8,7 @@ import type { NoteItem } from '@/lib/types'
 import { useSessionUser } from '@/hooks/useSessionUser'
 
 // Rebuilt Followup Composer: focuses on clear hit targets & accessible structure
-export default function FollowupComposer() {
+export default function FollowupComposer({ onGmailConnected, onSendComplete }: { onGmailConnected?: () => void; onSendComplete?: () => void } = {}) {
   const { selectedClientId, pushToast } = useUI()
   const { data: activeClient } = useClient((selectedClientId || '') as any)
   const { user } = useSessionUser()
@@ -61,6 +61,34 @@ export default function FollowupComposer() {
         setTimeout(() => loadSenders(), 1000)
       }
     }, 1000)
+
+    // Listen for OAuth success message from popup
+    const handleMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return
+      
+      if (event.data?.type === 'GMAIL_OAUTH_SUCCESS') {
+        // Close popup and clean up
+        popup?.close()
+        clearInterval(checkClosed)
+        window.removeEventListener('message', handleMessage)
+        
+        // Show success toast
+        pushToast({
+          type: 'success',
+          message: `Gmail connected successfully! (${event.data.email})`
+        })
+        
+        // Refresh senders
+        setTimeout(() => loadSenders(), 500)
+        
+        // Close modal if callback provided
+        if (onGmailConnected) {
+          setTimeout(() => onGmailConnected(), 1000) // Small delay to let user see the success message
+        }
+      }
+    }
+    
+    window.addEventListener('message', handleMessage)
   }
   const baseInstruction = 'Draft a concise follow-up referencing relevant milestones and next steps. Avoid redundancy. Close with a clear call-to-action.'
   const personalizationPrompts = [
@@ -176,10 +204,24 @@ export default function FollowupComposer() {
         contacts: contextData.contacts,
         milestones: contextData.milestones,
       }
-  const promptMap: Record<string,string> = Object.fromEntries(personalizationPrompts.map(p=>[p.key,p.text]))
-  const extra = selectedPrompts.map(k=>promptMap[k]).filter(Boolean).join('\n')
-  const combinedInstruction = `Tone: ${tone}. Context JSON: ${JSON.stringify(ctx)}\n${baseInstruction}${extra? '\n'+extra:''}`
-  const payload = { clientId: selectedClientId, channel, instruction: combinedInstruction }
+      
+      // Map selected prompts to their labels for structured processing
+      const promptMap: Record<string,string> = Object.fromEntries(personalizationPrompts.map(p=>[p.key,p.label]))
+      const selectedFocusAreas = selectedPrompts.map(k=>promptMap[k]).filter(Boolean)
+      
+      const combinedInstruction = `Generate a professional ${tone} email following the exact template format. 
+      
+Selected Focus Areas: ${selectedFocusAreas.join(', ')}
+
+Create a separate personalization block for each selected focus area. Context JSON: ${JSON.stringify(ctx)}`
+
+      const payload = { 
+        clientId: selectedClientId, 
+        channel, 
+        instruction: combinedInstruction,
+        focusAreas: selectedFocusAreas,
+        tone
+      }
       const res = await fetch('/api/ai/followup', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(payload) })
       const json = await res.json(); if (!res.ok) throw new Error(json?.error || 'Failed')
       const displayName = user?.user_metadata?.full_name || user?.user_metadata?.name || user?.email?.split('@')[0] || 'Agent'
@@ -225,12 +267,17 @@ export default function FollowupComposer() {
           throw new Error(json?.error || 'Failed to send email')
         }
         
-        pushToast({ type: 'success', message: '✅ Email sent successfully via Gmail! Check your sent folder.' })
+        pushToast({ type: 'success', message: 'Your message has been sent!' })
         
         // Reset form after successful send
         setDraft('')
         setSubject('Follow-up')
         setSelectedPrompts([])
+        
+        // Close modal if callback provided
+        if (onSendComplete) {
+          setTimeout(() => onSendComplete(), 500) // Small delay to let user see the success message
+        }
         return
       } catch (e: any) {
         console.error('[followup] Send now error:', e)
@@ -308,12 +355,16 @@ export default function FollowupComposer() {
         }
         
         const sequenceMessage = []
-        if (emailsSent > 0) sequenceMessage.push(`${emailsSent} sent immediately`)
+        if (emailsSent > 0) sequenceMessage.push(`${emailsSent} sent`)
         if (emailsScheduled > 0) sequenceMessage.push(`${emailsScheduled} scheduled`)
         
         pushToast({ 
           type:'success', 
-          message:`✅ Email sequence created successfully! ${sequenceMessage.join(' and ')}. Check the Email Dashboard to track all emails.` 
+          message: emailsSent > 0 && emailsScheduled > 0 
+            ? 'Your message has been sent and future messages have been scheduled!'
+            : emailsSent > 0 
+              ? 'Your message has been sent!'
+              : 'Your messages have been scheduled!'
         })
         
         // Reset form after successful scheduling
@@ -321,6 +372,11 @@ export default function FollowupComposer() {
         setSubject('Follow-up')
         setSelectedPrompts([])
         setSequenceOffsets([])
+        
+        // Close modal if callback provided
+        if (onSendComplete) {
+          setTimeout(() => onSendComplete(), 500) // Small delay to let user see the success message
+        }
       } else {
         const res = await fetch('/api/email/schedule', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(payload) })
         const j = await res.json(); if(!res.ok) throw new Error(j?.error||'Schedule failed')
@@ -330,12 +386,17 @@ export default function FollowupComposer() {
           : scheduleMode === 'custom' && customWhen ? new Date(customWhen).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' }) 
           : 'the selected time'
         
-        pushToast({ type:'success', message: `✅ Email successfully scheduled for ${scheduleTime}. Check the Email Dashboard to track it.` })
+        pushToast({ type:'success', message: 'Your message has been scheduled!' })
         // Reset form after successful scheduling
         setDraft('')
         setSubject('Follow-up')
         setSelectedPrompts([])
         setCustomWhen('')
+        
+        // Close modal if callback provided
+        if (onSendComplete) {
+          setTimeout(() => onSendComplete(), 500) // Small delay to let user see the success message
+        }
       }
     } catch(e:any) { 
       console.error('[followup] Schedule error:', e)
@@ -480,8 +541,22 @@ export default function FollowupComposer() {
           )}
         </div>
         <div className="mt-4 rounded-lg border border-default bg-surface p-4 min-h-[140px] overflow-auto">
-          <div className="text-xs font-semibold text-muted mb-2">Draft Preview</div>
-          {draft? <pre className="whitespace-pre-wrap text-sm leading-relaxed text-ink">{draft}</pre> : <div className="text-xs text-muted">No draft yet.</div>}
+          <div className="text-xs font-semibold text-muted mb-2">Draft Preview - Click to Edit</div>
+          {draft ? (
+            <textarea 
+              className="w-full min-h-[120px] text-sm leading-relaxed text-ink email-preview resize-y bg-transparent border-none p-0 focus:outline-none"
+              style={{
+                fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif',
+                lineHeight: '1.6',
+                color: '#374151',
+              }}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              placeholder="Your generated email draft will appear here..."
+            />
+          ) : (
+            <div className="text-xs text-muted">No draft yet.</div>
+          )}
         </div>
       </fieldset>
 

@@ -116,6 +116,39 @@ export async function GET(req: NextRequest) {
   
   if (result.error) return NextResponse.json({ error: result.error.message }, { status: 500 })
 
-  // Redirect back to app sender management
-  return NextResponse.redirect(process.env.NEXT_PUBLIC_APP_URL || '/')
+  // Create a success page that will post message to parent and close popup
+  const successHtml = `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <title>Gmail Connected</title>
+        <style>
+          body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
+          .success { color: #22c55e; font-size: 18px; margin-bottom: 20px; }
+          .info { color: #6b7280; font-size: 14px; }
+        </style>
+      </head>
+      <body>
+        <div class="success">✓ Gmail Connected Successfully!</div>
+        <div class="info">This window will close automatically...</div>
+        <script>
+          // Post success message to parent window
+          if (window.opener) {
+            window.opener.postMessage({
+              type: 'GMAIL_OAUTH_SUCCESS',
+              email: '${email}'
+            }, window.location.origin);
+          }
+          // Close popup after a short delay
+          setTimeout(() => {
+            window.close();
+          }, 1500);
+        </script>
+      </body>
+    </html>
+  `;
+
+  return new Response(successHtml, {
+    headers: { 'Content-Type': 'text/html' }
+  });
 }

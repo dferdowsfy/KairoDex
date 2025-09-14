@@ -30,6 +30,6 @@ const config: Config = {
       backdropBlur: { xs: '2px' }
     }
   },
-  plugins: [require('tailwindcss-animate')]
+  plugins: [require('tailwindcss-animate'), require('@tailwindcss/line-clamp')]
 }
 export default config

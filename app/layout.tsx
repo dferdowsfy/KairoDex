@@ -13,6 +13,7 @@ import FooterMount from '@/components/FooterMount'
 import { usePathname } from 'next/navigation'
 import CanvasScaler from '@/components/CanvasScaler'
 import A11yAnnouncer from '@/components/A11yAnnouncer'
+import Toast from '@/components/Toast'
 
 const inter = Inter({ subsets: ['latin'], variable: '--font-inter' })
 const sora = Sora({ subsets: ['latin'], variable: '--font-sora' })
@@ -58,6 +59,7 @@ export default function RootLayout({ children }: { children: any }) {
           {/* Sticky bottom action bar: viewport-anchored, visually scales via CSS vars from CanvasScaler */}
           <StickyActionBar />
           <A11yAnnouncer />
+          <Toast />
         </Providers>
   <InstallHint />
       </body>
