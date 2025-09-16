@@ -1,5 +1,6 @@
 "use client"
-import React, { useMemo, useState, useCallback } from 'react'
+import React, { useMemo, useState, useCallback, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import ScheduleSend from '@/components/email/ScheduleSend'
 import { useQueryClient } from '@tanstack/react-query'
 import { useUI } from '@/store/ui'
@@ -310,16 +311,17 @@ export default function Snapshot() {
       )}
 
       {/* Add Note modal */}
-          {addOpen && (
-        <div role="dialog" aria-modal className="fixed inset-0 z-[9999] grid place-items-center p-4 sm:p-6 pointer-events-auto">
-          <div className="absolute inset-0 bg-black/30 z-[9998]" onClick={()=>{ if (DEBUG) console.log('Add Note backdrop clicked'); !addBusy && setAddOpen(false)}} />
-          <div className="relative z-[10000] w-[min(680px,95vw)] max-h-[90vh] overflow-y-auto rounded-2xl bg-white border-2 border-blue-600/40 shadow-xl p-5 pointer-events-auto">
+      {addOpen && typeof document !== 'undefined' && createPortal(
+        <div role="dialog" aria-modal className="fixed inset-0 z-[9999] flex items-center justify-center p-4 sm:p-6">
+          <div className="absolute inset-0 bg-black/35 backdrop-blur-sm" onClick={()=>{ if (DEBUG) console.log('Add Note backdrop clicked'); !addBusy && setAddOpen(false)}} />
+          <div className="relative w-[min(720px,95vw)] max-h-[calc(100vh-120px)] overflow-y-auto rounded-2xl bg-white border border-blue-200 shadow-2xl p-6 animate-[fadeIn_.18s_ease-out]">
             <div className="text-xl font-semibold text-blue-900 mb-2">Add Notes</div>
-            <p className="text-sm text-blue-800 mb-3">Paste client notes. We’ll structure key dates, next steps, budget and more.</p>
-            <div className="mb-3 flex items-center gap-2">
-              <span className="text-sm text-blue-800 font-medium">Client</span>
+            <p className="text-sm text-blue-800 mb-4">Paste client notes. We’ll structure key dates, next steps, budget and more.</p>
+            <div className="mb-4 flex items-center gap-3">
+              <label className="text-sm text-blue-800 font-medium" htmlFor="add_note_client">Client</label>
               <select
-                className="rounded-lg border border-blue-300 bg-white px-3 py-1 text-sm text-slate-900 focus:ring-2 focus:ring-blue-500/40"
+                id="add_note_client"
+                className="rounded-lg border border-blue-300 bg-white px-3 py-1.5 text-sm text-slate-900 focus:ring-2 focus:ring-blue-500/40 focus:outline-none"
                 value={addClientId}
                 onChange={(e)=>setAddClientId(e.target.value)}
               >
@@ -329,17 +331,20 @@ export default function Snapshot() {
                 ))}
               </select>
             </div>
-            <textarea value={addText} onChange={(e)=>setAddText(e.target.value)} className="w-full min-h-[160px] rounded-xl border-2 border-blue-200 focus:border-blue-400 focus:ring-2 focus:ring-blue-400/30 p-3 text-base bg-blue-50/50" placeholder="Paste notes here…" />
-            <div className="mt-3 flex items-center gap-2 justify-end">
-              <button type="button" className="rounded-xl border-2 border-blue-300 px-4 py-2 text-blue-800 bg-white hover:bg-blue-50" onClick={()=>setAddOpen(false)} disabled={addBusy}>Cancel</button>
-              <button type="button" className="rounded-xl bg-blue-700 hover:bg-blue-800 text-white px-4 py-2 disabled:opacity-50 inline-flex items-center gap-2" onClick={handleParseNotes} disabled={!addText.trim() || addBusy || !addClientId}>
+            <textarea value={addText} onChange={(e)=>setAddText(e.target.value)} className="w-full min-h-[200px] rounded-xl border border-blue-200 focus:border-blue-400 focus:ring-2 focus:ring-blue-400/30 p-4 text-base bg-blue-50/40 resize-vertical" placeholder="Paste notes here…" />
+            <div className="mt-5 flex items-center gap-3 justify-end">
+              <button type="button" className="rounded-lg border border-blue-300 px-4 py-2 text-blue-800 bg-white hover:bg-blue-50 transition-colors" onClick={()=>setAddOpen(false)} disabled={addBusy}>Cancel</button>
+              <button type="button" className="rounded-lg bg-blue-700 hover:bg-blue-800 text-white px-5 py-2 disabled:opacity-50 inline-flex items-center gap-2 font-medium shadow" onClick={handleParseNotes} disabled={!addText.trim() || addBusy || !addClientId}>
                 {addBusy && <Spinner className="h-4 w-4" />}
-                <span>{addBusy? 'Adding…':'Add'}</span>
+                <span>{addBusy? 'Adding…':'Add Note'}</span>
               </button>
             </div>
           </div>
-        </div>
-      )}
+          <style jsx global>{`
+            @keyframes fadeIn { from { opacity:0; transform: translateY(4px); } to { opacity:1; transform: translateY(0); } }
+          `}</style>
+        </div>, document.body)
+      }
 
   {/* Unified ScheduleSend popup (always mounted, controls visibility via its own store) */}
   <ScheduleSend clientId={selectedClientId || ''} />

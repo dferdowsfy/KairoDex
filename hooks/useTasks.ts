@@ -47,7 +47,11 @@ export function useTasks(clientId?: string) {
   const create = useMutation({
     mutationFn: async (task: Partial<Task>) => {
       if (USE_MOCKS) return mockDb.createTask(task)
-      const res = await fetch('/api/sheets/tasks', { method: 'POST', body: JSON.stringify(task) })
+      const res = await fetch('/api/sheets/tasks', { 
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(task)
+      })
       if (!res.ok) throw new Error(await res.text())
       const json = await res.json()
       return json.item as Task
