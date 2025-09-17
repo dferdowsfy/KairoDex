@@ -6,7 +6,7 @@
 import React, { useEffect, useState } from 'react'
 import { useUI } from '@/store/ui'
 import { useClient } from '@/hooks/useClient'
-import AmendmentWizard from '@/components/contracts/AmendmentWizard'
+import { AmendmentWizard } from '@/components/contracts'
 
 interface ContractRecord {
   id: string
