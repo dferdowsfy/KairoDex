@@ -170,7 +170,7 @@ export async function POST(req: NextRequest) {
       const supabase = createClient(supabaseUrl, supabaseKey)
       const { data: contract, error } = await supabase.from('contract_files').select('*').eq('id', contractId).single()
       if (error || !contract) throw new Error('Contract not found')
-      finalText = contract?.metadata?.amended_content || ''
+  finalText = contract?.metadata?.amended_content || contract?.metadata?.initial_content || ''
       fileName = contract?.contract_name || fileName
       if (!finalText) throw new Error('No amended text available for this contract')
     }

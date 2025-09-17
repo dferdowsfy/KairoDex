@@ -17,7 +17,31 @@ export default function NotesHistory({ clientId }: { clientId?: string }) {
         {items.map(it => (
           <li key={it.id} className="flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
             <div className="text-xs text-slate-500 w-28 shrink-0">{new Date(it.created_at).toLocaleString()}</div>
-            <div className="text-sm text-slate-800 whitespace-pre-wrap flex-1">{it.text}</div>
+            <div className="text-sm text-slate-800 flex-1">
+              {/* If the backend provided structured note, render it nicely */}
+              {it.structured ? (
+                <div className="space-y-2">
+                  {it.structured.name && <div className="font-semibold">{it.structured.name}</div>}
+                  {it.structured.summary && (
+                    <div className="flex gap-2 items-center text-xs">
+                      {it.structured.summary.budget && <div className="px-2 py-1 bg-slate-100 rounded-full">Budget: {it.structured.summary.budget}</div>}
+                      {it.structured.summary.email && <div className="px-2 py-1 bg-slate-100 rounded-full">{it.structured.summary.email}</div>}
+                      {it.structured.summary.phone && <div className="px-2 py-1 bg-slate-100 rounded-full">{it.structured.summary.phone}</div>}
+                    </div>
+                  )}
+                  <div className="mt-1 space-y-1">
+                    {it.structured.sections.map((s, idx) => (
+                      <div key={idx} className="text-sm">
+                        <div className="font-medium text-slate-700">{s.title}</div>
+                        <div className="text-slate-700 whitespace-pre-wrap text-sm">{s.content}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="whitespace-pre-wrap">{it.text}</div>
+              )}
+            </div>
             <button aria-label="Delete" title="Delete" className="ml-2 inline-flex items-center gap-1 text-xs text-rose-700 hover:text-rose-900" onClick={()=>remove.mutate(it.id)}>
               <Trash2 className="h-4 w-4" /> Delete
             </button>

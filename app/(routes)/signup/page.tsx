@@ -10,6 +10,8 @@ import { useRouter } from 'next/navigation'
 export default function SignupPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [firstName, setFirstName] = useState('')
+  const [lastName, setLastName] = useState('')
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [isError, setIsError] = useState(false)
@@ -22,7 +24,7 @@ export default function SignupPage() {
     setMessage(null)
     setIsError(false)
     try {
-      const resp = await fetch('/api/auth/signup', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email, password }) })
+  const resp = await fetch('/api/auth/signup', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email, password, firstName, lastName }) })
       const j = await resp.json()
       if (!resp.ok) {
         const detail = j.issues ? `\n- ${j.issues.join('\n- ')}` : ''
@@ -61,6 +63,10 @@ export default function SignupPage() {
           <div className="text-3xl font-semibold mb-2 text-slate-900">Create account</div>
           <p className="text-sm text-slate-600 mb-6">Use email/password to sign up.</p>
           <form onSubmit={signUp} className="space-y-3 text-left">
+            <div className="grid grid-cols-2 gap-2">
+              <input type="text" required className="h-11 input-neon px-3 text-base" placeholder="First name" value={firstName} onChange={(e)=>setFirstName(e.target.value)} />
+              <input type="text" required className="h-11 input-neon px-3 text-base" placeholder="Last name" value={lastName} onChange={(e)=>setLastName(e.target.value)} />
+            </div>
             <input type="email" required className="w-full h-11 input-neon px-3 text-base" placeholder="Email" value={email} onChange={(e)=>setEmail(e.target.value)} />
             <input type="password" required minLength={8} className="w-full h-11 input-neon px-3 text-base" placeholder="Password (min 8 characters)" value={password} onChange={(e)=>setPassword(e.target.value)} />
             <button type="submit" disabled={loading} className="w-full btn-neon">{loading ? 'Creating…' : 'Create account'}</button>

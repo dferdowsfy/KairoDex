@@ -50,8 +50,6 @@ export default function AddClientModal({ open, onClose, onCreated }: { open: boo
   const [autoInserted, setAutoInserted] = useState(false)
   const [splitStrategy, setSplitStrategy] = useState<'first'|'last'|'auto'>('auto')
   const [previewResult, setPreviewResult] = useState<any | null>(null)
-  const [splitOpen, setSplitOpen] = useState(false)
-  const splitRef = useRef<HTMLDivElement | null>(null)
 
   // Ensure the modal appears at the top and the viewport is scrolled to top on open
   useEffect(() => {
@@ -64,16 +62,7 @@ export default function AddClientModal({ open, onClose, onCreated }: { open: boo
     }
   }, [open])
 
-  // close split dropdown when click outside
-  useEffect(() => {
-    function onDoc(e: MouseEvent) {
-      if (!splitRef.current) return
-      if (e.target && splitRef.current.contains(e.target as Node)) return
-      setSplitOpen(false)
-    }
-    if (splitOpen) document.addEventListener('mousedown', onDoc)
-    return () => document.removeEventListener('mousedown', onDoc)
-  }, [splitOpen])
+  // (Name split strategy UI removed in production build; split logic still uses 'auto' by default)
 
   if (!open) return null
 
@@ -536,21 +525,7 @@ export default function AddClientModal({ open, onClose, onCreated }: { open: boo
               </div>
 
               <div className="flex items-center gap-3">
-                <label className="text-sm">Name split strategy:</label>
-                <div className="relative inline-block" ref={splitRef}>
-                  <button type="button" onClick={()=>setSplitOpen(s=>!s)} className="rounded-xl border px-3 py-1 flex items-center gap-2">
-                    <span className="text-sm">{splitStrategy === 'auto' ? 'Auto (best-effort)' : splitStrategy === 'first' ? 'First token = first name' : 'Last token = last name'}</span>
-                    <svg className="w-3 h-3" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6 8l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-                  </button>
-                  {splitOpen && (
-                    <div className="absolute left-0 mt-2 w-64 bg-white border rounded shadow-md z-50">
-                      <button onClick={()=>{ setSplitStrategy('auto'); setSplitOpen(false) }} className="w-full text-left px-3 py-2 hover:bg-gray-50 text-sm">Auto (best-effort)</button>
-                      <button onClick={()=>{ setSplitStrategy('first'); setSplitOpen(false) }} className="w-full text-left px-3 py-2 hover:bg-gray-50 text-sm">First token = first name</button>
-                      <button onClick={()=>{ setSplitStrategy('last'); setSplitOpen(false) }} className="w-full text-left px-3 py-2 hover:bg-gray-50 text-sm">Last token = last name</button>
-                    </div>
-                  )}
-                </div>
-
+                {/* Name split strategy UI removed for production; split logic still uses 'auto' by default */}
                 <button onClick={()=>{
                   // Quick sample insert
                   setTextInput('Alex Rivera\nalex@example.com\n(555) 111-2222\nMet at open house.\n\nJamie Lopez\njamie@example.com\n(555) 222-3333\nReferred by Sam.')

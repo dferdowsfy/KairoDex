@@ -804,7 +804,12 @@ export default function TasksPage() {
 }
 
 function SaveButton({ title, due, reminder, onSaved }: { title: string; due?: Date; reminder?: string; onSaved: () => void }) {
-  const { create } = useTasks()
+  // Pass selected client id to hook so create mutation automatically includes filtering context
+  // We access UI store directly here rather than threading prop to keep surface area small
+  // If no client selected, task will be global (client_id null)
+  // Import inside function to avoid circular issues if store pulls from hooks referencing this file
+  const { selectedClientId } = require('@/store/ui').useUI()
+  const { create } = useTasks(selectedClientId || undefined)
   const disabled = !title.trim()
   const handle = async () => {
     let due_at: string | undefined
@@ -813,7 +818,7 @@ function SaveButton({ title, due, reminder, onSaved }: { title: string; due?: Da
       due_at = tzFixed.toISOString()
     }
     const combinedTitle = `${title.trim()}${reminder && reminder.trim() ? ' — ' + reminder.trim() : ''}`
-    await create.mutateAsync({ title: combinedTitle, status: 'open', due_at })
+    await create.mutateAsync({ title: combinedTitle, status: 'open', due_at, client_id: selectedClientId || undefined })
     onSaved()
   }
   return (

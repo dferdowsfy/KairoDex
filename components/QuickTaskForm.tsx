@@ -18,7 +18,10 @@ const QuickTaskForm = forwardRef<QuickTaskFormHandle, Props>(function QuickTaskF
   async function save() {
     if (saving) return
     const t = title.trim()
-    if (!t) { pushToast({ type: 'info', message: 'Enter a task title.' }); return }
+    if (!t) { 
+      pushToast({ type: 'info', message: 'Enter a task title.' }); 
+      return 
+    }
     setSaving(true)
     try {
       let due_at: string | undefined
@@ -26,14 +29,19 @@ const QuickTaskForm = forwardRef<QuickTaskFormHandle, Props>(function QuickTaskF
         const tzFixed = new Date(due.getTime() - due.getTimezoneOffset() * 60000)
         due_at = tzFixed.toISOString()
       }
+      console.log('Creating task:', { client_id: clientId, title: t, due_at, status: 'open' })
       await create.mutateAsync({ client_id: clientId, title: t, due_at, status: 'open' as any })
       pushToast({ type: 'success', message: 'Task created.' })
       onCreated?.()
       setTitle('')
       setDue(null)
     } catch (e: any) {
+      console.error('Task creation failed:', e)
       pushToast({ type: 'error', message: e?.message || 'Failed to create task' })
-    } finally { setSaving(false) }
+      throw e // Re-throw so calling code can handle it
+    } finally { 
+      setSaving(false) 
+    }
   }
 
   useImperativeHandle(ref, () => ({ save, isSaving: () => saving }))

@@ -59,9 +59,59 @@ export async function handleChatPOST(req: NextRequest) {
     if (/(conversation\s*starter|talking\s*points|what\s+should\s+i\s+(say|mention)|ice\s*breaker|openers?)/.test(m)) return 'conversation_starter'
     if (/(summary|summarize|status|overview)/.test(m)) return 'status'
     if (/(meeting\s*prep|agenda|prep\s*questions)/.test(m)) return 'meeting_prep'
+    if (/(email|correspondence|last.*email|recent.*email|email.*history|what.*email|previous.*email)/.test(m)) return 'email_correspondence'
   if (/(market|real\s*estate|housing|home\s*prices?|inventory|days\s*on\s*market|mortgage|outlook|forecast|trend[s]?|future\b)/.test(m)) return 'market'
     return undefined
   })()
+
+  // Fetch recent email correspondence if the user is asking about emails
+  let emailHistory: any[] = []
+  if (clientId && /email|correspondence|last.*email|recent.*email|email.*history/i.test(msg)) {
+    try {
+      const supabase = supabaseServer()
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        // Get recent emails for this client
+        const { data: emails } = await supabase
+          .from('emails')
+          .select('id, subject, body_md, status, sent_at, created_at, to_emails')
+          .eq('client_id', clientId)
+          .eq('owner_id', user.id)
+          .order('created_at', { ascending: false })
+          .limit(5)
+        
+        // Also check scheduled emails
+        const { data: scheduledEmails } = await supabase
+          .from('email_schedules')
+          .select('id, email_subject, email_content, status, sent_at, created_at, recipient_email')
+          .eq('client_id', clientId)
+          .order('created_at', { ascending: false })
+          .limit(5)
+
+        emailHistory = [
+          ...(emails || []).map(email => ({
+            subject: email.subject,
+            status: email.status,
+            sent_at: email.sent_at,
+            created_at: email.created_at,
+            preview: email.body_md?.substring(0, 150) + '...',
+            type: 'direct_email'
+          })),
+          ...(scheduledEmails || []).map(email => ({
+            subject: email.email_subject,
+            status: email.status,
+            sent_at: email.sent_at,
+            created_at: email.created_at,
+            preview: email.email_content?.substring(0, 150) + '...',
+            type: 'scheduled_email'
+          }))
+        ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+         .slice(0, 5)
+      }
+    } catch (e) {
+      console.error('Failed to fetch email history:', e)
+    }
+  }
   
   // Try to gather market snapshot if the user asks market-related questions and we have a location.
   const locationFromRow = (() => {
@@ -106,12 +156,18 @@ Core context & truthfulness
 If STRUCTURED_NOTES are provided, prefer them for next steps, deadlines, contacts, and concrete details. Summarize from these items rather than guessing from free text.
 Keep answers concise by default: 5–8 short sentences max unless the user asks for more.
 
+If EMAIL_HISTORY is provided and the user asks about email correspondence, last emails, or email history:
+- Reference the actual email history provided in the context
+- Include subject lines, dates, and status information
+- Show the most recent emails first
+- Distinguish between sent emails and scheduled emails
+
 If MARKET_CONTEXT is provided OR the user asks about the real estate market, set USE_CASE to market and use it to answer.
 - Keep claims grounded in MARKET_CONTEXT; do not extrapolate beyond it.
 - End market answers with a short 'Sources:' line listing provided URLs when present.
 
 Use case detection and guardrails
-- First, infer USE_CASE from the user’s request and CLIENT_CONTEXT. Choose one: followup, status, conversation_starter, meeting_prep, contract_amendment, market, other.
+- First, infer USE_CASE from the user's request and CLIENT_CONTEXT. Choose one: followup, status, conversation_starter, meeting_prep, contract_amendment, market, email_correspondence, other.
 - Based on USE_CASE, determine GUARDRAILS to apply in your response. Always include universal guardrails and any use-case-specific ones:
   Universal guardrails:
     • Respect explicit DNC/opt-out flags: if true, do not propose or draft outreach; provide INTERNAL guidance only.
@@ -123,6 +179,7 @@ Use case detection and guardrails
     • conversation_starter: low-pressure, 3–5 bullets; if DNC, provide INTERNAL meeting talking points only.
     • meeting_prep: provide short checklist, agenda, and 3–5 questions; avoid promises.
     • contract_amendment: avoid legal advice; outline steps, risks to confirm with a professional.
+    • email_correspondence: reference EMAIL_HISTORY data only; show chronological order; include subject, date, status; do not invent email content.
 
 Clarifying questions first when needed
 - If the request is ambiguous or missing critical details for the detected USE_CASE, ask 1–3 concise clarifying questions FIRST and wait for answers. Do not produce the final output yet if key details are missing.
@@ -138,7 +195,7 @@ Outreach policy
 Response shape
 - If asking questions: start with a single sentence identifying the inferred USE_CASE, then a short list (1–3) of clarifying questions. Stop there.
 - If producing the result: begin with a one-line USE_CASE label (e.g., "Use case: followup"), then apply guardrails and provide the content. Keep it concise and action-oriented.`
-  const user = `CLIENT_CONTEXT (from Supabase AgentHub_DB):\n${JSON.stringify({ client, dbRow: sheetRow, structured_notes: structuredNotes, intent: intent || derivedIntent, dnc_explicit: !!sheetRow && (()=>{ try { const s:any = sheetRow; const keys = Object.keys(s||{}); const allowed=['do_not_contact','dnc','opt_out','optout','unsubscribe','do-not-contact']; for (const k of keys){ const kn=k.toLowerCase().replace(/\s+/g,'_'); if (allowed.includes(kn)){ const v=s[k]; if (typeof v==='string'){ if (/^(true|yes|y|1)$/i.test(v.trim())) return true } if (!!v) return true } } } catch{} return false })(), MARKET_CONTEXT: marketContext, CONTEXT_BUNDLE: contextBundle }, null, 2)}\n\nUSER:\n${message}`
+  const user = `CLIENT_CONTEXT (from Supabase AgentHub_DB):\n${JSON.stringify({ client, dbRow: sheetRow, structured_notes: structuredNotes, email_history: emailHistory, intent: intent || derivedIntent, dnc_explicit: !!sheetRow && (()=>{ try { const s:any = sheetRow; const keys = Object.keys(s||{}); const allowed=['do_not_contact','dnc','opt_out','optout','unsubscribe','do-not-contact']; for (const k of keys){ const kn=k.toLowerCase().replace(/\s+/g,'_'); if (allowed.includes(kn)){ const v=s[k]; if (typeof v==='string'){ if (/^(true|yes|y|1)$/i.test(v.trim())) return true } if (!!v) return true } } } catch{} return false })(), MARKET_CONTEXT: marketContext, CONTEXT_BUNDLE: contextBundle }, null, 2)}\n\nUSER:\n${message}`
 
     // First pass: general completion
   let response = await aiComplete(system, user, { temperature: 0.3 })

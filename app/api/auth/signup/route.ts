@@ -20,10 +20,11 @@ export async function POST(req: Request) {
 
   const supabase = supabaseServer()
   
+  const combinedName = [firstName, lastName].filter(Boolean).join(' ').trim()
   const { data, error } = await (supabase as any).auth.signUp({ 
     email, 
     password, 
-    options: { data: { first_name: firstName, last_name: lastName } } 
+    options: { data: { first_name: firstName, last_name: lastName, name: combinedName || undefined, full_name: combinedName || undefined } } 
   })
   
   if (error) {
