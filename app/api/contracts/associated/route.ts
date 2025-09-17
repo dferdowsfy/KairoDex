@@ -13,9 +13,17 @@ export async function GET(req: Request) {
 
     // Use service role for broader access to contract_files
     const { createClient } = await import('@supabase/supabase-js')
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
-    if (!supabaseUrl || !serviceKey) throw new Error('Supabase config missing')
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL
+    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY
+    
+    if (!supabaseUrl || !serviceKey) {
+      console.error('Supabase config missing for associated contracts:', { 
+        hasUrl: !!supabaseUrl, 
+        hasKey: !!serviceKey,
+        envKeys: Object.keys(process.env).filter(k => k.includes('SUPABASE'))
+      })
+      throw new Error('Supabase config missing')
+    }
     const serviceSupabase = createClient(supabaseUrl, serviceKey)
 
     // Fetch AgentHub_DB row for this agent owner using the authenticated user ID
