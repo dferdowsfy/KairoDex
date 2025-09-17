@@ -1,6 +1,7 @@
 "use client"
 export const dynamic = 'force-dynamic'
 import React, { useEffect, useState, useRef } from 'react'
+import { useRouter } from 'next/navigation'
 import { useClients } from '@/hooks/useClients'
 import { useClient } from '@/hooks/useClient'
 import { useUI } from '@/store/ui'
@@ -9,7 +10,7 @@ import ClientSelector from '@/components/ClientSelector'
 // Replaced ActionCard tiles with unified large tile styling
 import ClientSummaryCard from '@/components/ClientSummaryCard'
 import FollowupComposer from '@/components/FollowupComposer'
-import AmendContractsPanel, { AmendContractsPanelHandle } from '@/components/AmendContractsPanel'
+// Removed legacy AmendContractsPanel (flow migrated to /contracts dashboard)
 import RecentClientsList from '@/components/RecentClientsList'
 import { useSessionUser } from '@/hooks/useSessionUser'
 import QuickTaskForm, { QuickTaskFormHandle } from '@/components/QuickTaskForm'
@@ -24,7 +25,7 @@ export default function HomePage() {
   const { selectedClientId, pushToast } = useUI()
   const { data: activeClient } = useClient((selectedClientId || '') as any)
   const { user } = useSessionUser()
-  const [activeModal, setActiveModal] = useState<null | 'followup' | 'amend' | 'task' | 'reminder'>(null)
+  const [activeModal, setActiveModal] = useState<null | 'followup' | 'task' | 'reminder'>(null)
   const [showReminder, setShowReminder] = useState(false) // existing reminder logic (kept inline for now)
   const [showAdd, setShowAdd] = useState(false)
   const { setChatOpen } = useUI()
@@ -62,22 +63,42 @@ export default function HomePage() {
     setActiveModal(null); setShowReminder(false)
   }
   const [originPoint, setOriginPoint] = useState<{ x: number; y: number } | null>(null)
-  async function onAction(type: 'followup'|'amend'|'task'|'reminder', e?: React.MouseEvent) {
-    if (!selectedClientId && type !== 'task') {
+  const router = useRouter()
+
+  async function onAction(type: 'followup'|'task'|'reminder', e?: React.MouseEvent) {
+    if (!selectedClientId && type === 'followup') {
       pushToast({ type: 'info', message: 'Pick a client first.' })
       return
     }
     resetPanels()
     if (e) setOriginPoint({ x: e.clientX, y: e.clientY })
     if (type === 'followup') setActiveModal('followup')
-    else if (type === 'amend') setActiveModal('amend')
     else if (type === 'task') setActiveModal('task')
     else if (type === 'reminder') setShowReminder(true)
   }
 
   // Refs for forms to trigger save from modal footer
   const taskFormRef = useRef<QuickTaskFormHandle | null>(null)
-  const amendRef = useRef<AmendContractsPanelHandle | null>(null)
+  // Contract list state (supabase contract_files)
+  interface ContractFile { id:string; contract_name:string; status?:string; version?:number; created_at?:string }
+  const [contracts, setContracts] = useState<ContractFile[]>([])
+  const [contractsLoading, setContractsLoading] = useState(false)
+
+  useEffect(()=> {
+    const load = async () => {
+      if (!selectedClientId) { setContracts([]); return }
+      setContractsLoading(true)
+      try {
+        const qs = new URLSearchParams({ clientId: selectedClientId })
+        const res = await fetch(`/api/contracts/list?${qs.toString()}`)
+        const j = await res.json()
+        if (res.ok) {
+          setContracts((j.contracts||[]).filter((c:any)=> c.client_id===selectedClientId))
+        }
+      } finally { setContractsLoading(false) }
+    }
+    load()
+  }, [selectedClientId])
 
   return (
   <main className="min-h-screen" style={{ background: 'linear-gradient(180deg,#F7F3EE,#F3EEE7 60%, #EFE8DF)' }}>
@@ -97,13 +118,17 @@ export default function HomePage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {[
               { k:'followup', label:'Generate Follow‑Up', desc: activeClient?`For ${(activeClient as any)?.name}`:'AI email / SMS draft', icon:<Sparkles className='h-7 w-7'/>, bg:'bg-amber-50', border:'border-amber-400', hover:'hover:bg-amber-100' },
-              { k:'amend', label:'Amend Contracts', desc:'Draft concise amendment', icon:<SquarePen className='h-7 w-7'/>, bg:'bg-emerald-50', border:'border-emerald-400', hover:'hover:bg-emerald-100' },
+              { k:'contracts', label:'Contracts', desc:'View & amend contracts', icon:<SquarePen className='h-7 w-7'/>, bg:'bg-emerald-50', border:'border-emerald-400', hover:'hover:bg-emerald-100' },
               { k:'task', label:'Create Task', desc:'Quick todo for today', icon:<CheckSquare className='h-7 w-7'/>, bg:'bg-violet-50', border:'border-violet-400', hover:'hover:bg-violet-100' },
               { k:'chat', label:'Chat', desc:'Ask or draft anything', icon:<MessageCircle className='h-7 w-7'/>, bg:'bg-indigo-50', border:'border-indigo-400', hover:'hover:bg-indigo-100' }
             ].map(item => (
                 <button
                 key={item.k}
-                onClick={(ev)=> item.k === 'chat' ? setChatOpen(true) : onAction(item.k as any, ev)}
+                onClick={(ev)=> {
+                  if (item.k === 'chat') { setChatOpen(true); return }
+                  if (item.k === 'contracts') { router.push('/contracts'); return }
+                  onAction(item.k as any, ev)
+                }}
                 className={`group relative text-left rounded-3xl border-2 ${item.border} ${item.bg} ${item.hover} transition-colors p-4 sm:p-5 lg:p-6 flex flex-col gap-3 sm:gap-4 shadow-sm hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500/40 min-h-[10rem] sm:min-h-[11rem] lg:min-h-[12rem] overflow-hidden`}
               >
                 <div className="flex items-start justify-between shrink-0">
@@ -174,20 +199,39 @@ export default function HomePage() {
       onSendComplete={() => setActiveModal(null)} 
     />
   </Modal>
-  <Modal
-    isOpen={activeModal==='amend'}
-    onClose={()=>setActiveModal(null)}
-    title="Amend Contracts"
-    originPoint={originPoint}
-    footerActions={(
-      <>
-        <button onClick={()=>setActiveModal(null)} className="px-4 py-2 rounded-lg border border-slate-300 bg-white text-slate-800 font-medium">Cancel</button>
-  <button onClick={async ()=>{ await amendRef.current?.apply(); }} className="px-5 py-2 rounded-lg bg-slate-900 text-white font-semibold">Apply</button>
-      </>
+  {/* Contracts list preview */}
+  <section className="mt-8 space-y-3">
+    <div className="flex items-center justify-between">
+      <h2 className="text-xl font-semibold text-slate-900">Contracts</h2>
+      <button onClick={()=> router.push('/contracts')} className="text-sm text-amber-600 hover:text-amber-700 font-medium">Open Dashboard →</button>
+    </div>
+    {!selectedClientId && <div className="text-slate-500 text-sm">Select a client to view contracts.</div>}
+    {selectedClientId && (
+      <div className="rounded-2xl border border-slate-200 bg-white p-4">
+        {contractsLoading && <div className="text-slate-500 text-sm">Loading…</div>}
+        {!contractsLoading && !contracts.length && <div className="text-slate-500 text-sm">No contracts yet.</div>}
+        {!contractsLoading && !!contracts.length && (
+          <ul className="divide-y divide-slate-100">
+            {contracts.slice(0,5).map(c=> (
+              <li key={c.id} className="py-2 flex items-center justify-between gap-4">
+                <div className="min-w-0">
+                  <div className="text-sm font-medium text-slate-800 truncate">{c.contract_name}</div>
+                  <div className="text-[11px] text-slate-500">{c.status || 'original'}{c.version?` • v${c.version}`:''}</div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button onClick={()=> router.push('/contracts')} className="text-xs font-medium text-amber-600 hover:text-amber-700">Amend</button>
+                  <button onClick={async ()=>{
+                    const r = await fetch('/api/docusign/sender-view', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ contractId: c.id }) })
+                    const j = await r.json(); if (r.ok && j.url) window.open(j.url,'_blank','noopener')
+                  }} className="text-xs font-medium text-slate-600 hover:text-slate-800">DocuSign</button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     )}
-  >
-    <AmendContractsPanel ref={amendRef} />
-  </Modal>
+  </section>
   <Modal
     isOpen={activeModal==='task'}
     onClose={()=>setActiveModal(null)}
@@ -196,7 +240,11 @@ export default function HomePage() {
     footerActions={(
       <>
         <button onClick={()=>setActiveModal(null)} className="px-4 py-2 rounded-lg border border-slate-300 bg-white text-slate-800 font-medium">Cancel</button>
-        <button onClick={()=>{ taskFormRef.current?.save(); }} className="px-5 py-2 rounded-lg bg-slate-900 text-white font-semibold">Save</button>
+        <button
+          onClick={async ()=>{ await taskFormRef.current?.save(); }}
+          disabled={taskFormRef.current?.isSaving && taskFormRef.current.isSaving()}
+          className="px-5 py-2 rounded-lg bg-slate-900 text-white font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+        >{taskFormRef.current?.isSaving && taskFormRef.current.isSaving()? 'Saving…' : 'Save'}</button>
       </>
     )}
   >

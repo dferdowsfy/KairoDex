@@ -4,7 +4,7 @@ import { useTasks } from '@/hooks/useTasks'
 import { useUI } from '@/store/ui'
 import WheelDateTime from '@/components/WheelDateTime'
 
-export interface QuickTaskFormHandle { save: () => void }
+export interface QuickTaskFormHandle { save: () => Promise<void>; isSaving: () => boolean }
 
 interface Props { clientId?: string; onCreated?: () => void; onCancel?: () => void; hideInternalActions?: boolean }
 
@@ -36,7 +36,7 @@ const QuickTaskForm = forwardRef<QuickTaskFormHandle, Props>(function QuickTaskF
     } finally { setSaving(false) }
   }
 
-  useImperativeHandle(ref, () => ({ save }))
+  useImperativeHandle(ref, () => ({ save, isSaving: () => saving }))
 
   return (
     <form onSubmit={(e)=>{ e.preventDefault(); save() }} className="rounded-2xl border border-slate-200 bg-white p-4">

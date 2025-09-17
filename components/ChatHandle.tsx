@@ -21,7 +21,7 @@ export default function ChatHandle() {
         type="button"
         aria-label="Open chat"
         onClick={() => setChatOpen(true)}
-        className="md:hidden fixed right-4 bottom-4 z-[80] h-12 w-12 grid place-items-center rounded-full bg-slate-900 text-white shadow-lg ring-1 ring-black/10"
+        className="md:hidden fixed right-4 bottom-[calc(72px+env(safe-area-inset-bottom,0px))] z-[80] h-12 w-12 grid place-items-center rounded-full bg-slate-900 text-white shadow-lg ring-1 ring-black/10 transition-transform active:scale-95"
       >
         <ChevronLeft className="h-5 w-5 rotate-180" />
       </button>
