@@ -50,7 +50,11 @@
     ".next/types/**/*.ts"
   ],
   "exclude": [
-  "node_modules",
-  "edge_functions"
+    "node_modules",
+    "edge_functions",
+    "tests",
+    "tests-examples",
+    "app/api/email/__tests__",
+    "supabase/functions"
   ]
 }
