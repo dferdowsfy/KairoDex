@@ -36,7 +36,7 @@ export async function POST(req: NextRequest) {
   const supabase = supabaseServer()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  const { clientId, tone } = await req.json()
+  const { clientId, tone, saveToDatabase = false } = await req.json()
   if (!clientId) return NextResponse.json({ error: 'Missing clientId' }, { status: 400 })
   const { data: client } = await supabase.from('clients').select('*').eq('id', clientId).eq('owner_id', user.id).single()
   const { data: notes } = await supabase.from('client_notes').select('note,created_at').eq('client_id', clientId).order('created_at', { ascending: false }).limit(5)
@@ -45,6 +45,29 @@ export async function POST(req: NextRequest) {
   try {
     const raw = await callLLM(prompt, tone)
     let parsed: any; try { parsed = JSON.parse(raw) } catch { parsed = { subject: 'Draft Subject', body_md: raw.slice(0,200) } }
+    
+    // Save to database if requested (when email is actually sent or scheduled)
+    if (saveToDatabase && client?.data) {
+      try {
+        const { markdownToHtml } = await import('@/lib/email')
+        const bodyHtml = markdownToHtml(parsed.body_md || '')
+        
+        await supabase.from('emails').insert({
+          owner_id: user.id,
+          client_id: clientId,
+          to_emails: [client.data.email].filter(Boolean),
+          subject: parsed.subject,
+          body_md: parsed.body_md,
+          body_html: bodyHtml,
+          status: 'draft',
+          created_at: new Date().toISOString()
+        })
+      } catch (e) {
+        console.error('Failed to save email to database:', e)
+        // Don't fail the request if database save fails
+      }
+    }
+    
     return NextResponse.json({ subject: parsed.subject, bodyMd: parsed.body_md })
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 })

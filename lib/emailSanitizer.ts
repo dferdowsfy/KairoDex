@@ -63,8 +63,50 @@ export function cleanPlaceholders(content: string, clientName?: string, userName
   // Remove any remaining bracketed tokens like [something] to avoid placeholders in emails
   out = out.replace(/\[[^\]]+\]/g, '')
 
-  // Collapse multiple spaces and clean up leftover punctuation from removals
-  out = out.replace(/\s{2,}/g, ' ').replace(/\s+([.,!?;:])/g, '$1')
+  // Normalize newlines (support CRLF input)
+  out = out.replace(/\r\n/g, '\n')
 
-  return out.trim()
+  // Reduce any runs of 3+ newlines down to exactly two (keep paragraph breaks)
+  out = out.replace(/\n{3,}/g, '\n\n')
+
+  // Collapse multiple spaces/tabs but do NOT collapse newlines (preserve paragraph spacing)
+  out = out.replace(/[ \t]{2,}/g, ' ')
+
+  // Remove spaces/tabs before punctuation but leave newlines intact
+  out = out.replace(/[ \t]+([.,!?;:])/g, '$1')
+
+  // Trim each line individually to remove accidental leading/trailing spaces while preserving blank lines
+  out = out.split('\n').map(line => line.trim()).join('\n')
+
+  // Trim overall leading/trailing whitespace
+  return out.replace(/^\s+|\s+$/g, '')
+}
+
+// Convert plain-text email body into safe HTML with <p> paragraphs.
+// - Escapes HTML special chars to avoid XSS
+// - Splits on two-or-more newlines into paragraphs
+// - Preserves single newlines inside paragraphs as <br />
+export function plaintextToHtml(content: string): string {
+  if (!content) return ''
+  // Normalize newlines
+  let out = content.replace(/\r\n/g, '\n')
+
+  // Escape HTML special characters
+  const escapeHtml = (s: string) => s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+
+  // Split into paragraphs on 2+ newlines, trim each paragraph
+  const paragraphs = out.split(/\n{2,}/).map(p => p.trim()).filter(Boolean)
+
+  const html = paragraphs.map(p => {
+    // Within a paragraph, convert single line breaks to <br /> for soft breaks
+    const withLineBreaks = escapeHtml(p).replace(/\n/g, '<br />')
+    return `<p>${withLineBreaks}</p>`
+  }).join('\n')
+
+  return html
 }

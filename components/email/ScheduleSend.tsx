@@ -4,6 +4,7 @@ import { useClient } from '@/hooks/useClient'
 import { useEmailComposer, EmailCadence } from '@/store/useEmailComposer'
 import { useUI } from '@/store/ui'
 import { cn } from '@/lib/utils'
+import { plaintextToHtml } from '@/lib/emailSanitizer'
 
 // Lightweight primitives (replace with shadcn/ui if already installed in project)
 const Button: React.FC<React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: string; size?: string }>=({className, ...rest})=> <button className={cn('inline-flex items-center justify-center rounded-md border text-sm px-3 h-9 bg-white hover:bg-neutral-50 disabled:opacity-50 transition-colors', className)} {...rest} />
@@ -260,6 +261,7 @@ export default function ScheduleSend({ trigger, onSaved, clientId }: Props) {
                   </div>
                 </div>
                 <textarea className="w-full rounded-md border-2 border-black p-3 text-sm h-64 min-h-[16rem] resize-y bg-neutral-50 focus:bg-neutral-50 focus:outline-none focus:ring-2 focus:ring-black/40" value={draftBody} onChange={e=>{ setDraftBody(e.target.value); store.set({ body: e.target.value }) }} placeholder="Edit your generated email content here..." />
+                  {/* Preview removed: only the editable textarea remains to be the single source of truth */}
               </div>
               {/* Quick grid */}
               <div className="grid grid-cols-2 gap-2">

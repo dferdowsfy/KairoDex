@@ -1,6 +1,6 @@
 "use client"
 import React, { useState, useEffect, useMemo } from 'react'
-import { sanitizeEmailBody, cleanPlaceholders } from '@/lib/emailSanitizer'
+import { sanitizeEmailBody, cleanPlaceholders, plaintextToHtml } from '@/lib/emailSanitizer'
 import { useUI } from '@/store/ui'
 import { useClient } from '@/hooks/useClient'
 import { useNoteItems } from '@/hooks/useNoteItems'
@@ -224,11 +224,162 @@ Create a separate personalization block for each selected focus area. Context JS
       }
       const res = await fetch('/api/ai/followup', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(payload) })
       const json = await res.json(); if (!res.ok) throw new Error(json?.error || 'Failed')
-      const displayName = user?.user_metadata?.full_name || user?.user_metadata?.name || user?.email?.split('@')[0] || 'Agent'
+  // Prefer explicit first/last name metadata if present (stored as first_name/last_name or name/full_name)
+  const meta = user?.user_metadata || {}
+  const metaFirst = (meta as any)?.first_name || (meta as any)?.firstName
+  const metaLast = (meta as any)?.last_name || (meta as any)?.lastName
+  const combinedMeta = [metaFirst, metaLast].filter(Boolean).join(' ')
+  const displayName = combinedMeta || meta?.full_name || meta?.name || user?.email?.split('@')[0] || 'Agent'
+      const clientName = (activeClient as any)?.name || 'there'
+      
       let body = json.draft || ''
+
+      // Normalize greeting to a consistent "Hi [ClientName]," format
+      if (body.match(/^(Dear|Hi|Hello)\s*\[?([^\],\n]*)\]?,?/i)) {
+        body = body.replace(/^(Dear|Hi|Hello)\s*\[?([^\],\n]*)\]?,?/i, `Hi ${clientName},`)
+      } else if (body.match(/^(Dear|Hi|Hello)\s*,/i)) {
+        body = body.replace(/^(Dear|Hi|Hello)\s*,/i, `Hi ${clientName},`)
+      } else if (!body.match(/^Hi\s+/i)) {
+        body = `Hi ${clientName},\n\n${body}`
+      }
+
+      // Aggressively remove citation markers and orphaned parentheses
+      body = body.replace(/\(\([^)]*\)\)/g, '') // remove ((...)) blocks
+      body = body.replace(/\(\(/g, '') // remove orphaned ((
+      body = body.replace(/\)\)/g, '') // remove orphaned ))
+      body = body.replace(/\([^)]*https?:\/\/[^)]*\)/gi, '') // remove (...https://...)
+      body = body.replace(/https?:\/\/[^\s\n)]+/gi, '') // remove standalone urls
+
+      // Remove common signoff sentences and any trailing agent name/signature
+      body = body.replace(/\bThank you for your time and attention\.?\s*I look forward to your reply\.?/i, '')
+      body = body.replace(/\bBest regards,?\b[\s\S]*$/i, '')
+
+      // Remove any accidental repetition of the agent's display name in the body (signature leftovers)
+      const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      try {
+        const nameRe = new RegExp(escapeRegExp(displayName), 'gi')
+        body = body.replace(nameRe, '')
+      } catch(e) {
+        // ignore regexp errors for weird display names
+      }
+
+      // Normalize whitespace
+      body = body.replace(/\r\n/g, '\n')
+      body = body.replace(/[ \t]{2,}/g, ' ')
+      body = body.replace(/\n{3,}/g, '\n\n')
+      body = body.trim()
+
+      // Smart paragraph grouping: split into sentences, then group into 2-3 sentence paragraphs
+      const makeParagraphs = (text: string) => {
+        if (!text) return ''
+        // Preserve existing paragraph breaks to not break intentionally formatted content
+        const existingParas = text.split(/\n{2,}/).map(p => p.trim()).filter(Boolean)
+        const paras: string[] = []
+
+        const splitToSentences = (p: string) => {
+          // Split on sentence-ending punctuation (., ?, !) followed by space and uppercase / digit / quote
+          const sentences = p.split(/(?<=[.!?])\s+(?=[A-Z0-9"'“‘\(])/g).map(s => s.trim()).filter(Boolean)
+          return sentences
+        }
+
+        for (const p of existingParas) {
+          const sentences = splitToSentences(p)
+          if (sentences.length <= 3) {
+            paras.push(sentences.join(' '))
+            continue
+          }
+
+          // Group sentences into chunks of 2-3
+          let i = 0
+          while (i < sentences.length) {
+            // try to take 3 sentences if combined length small, else 2
+            let take = 3
+            const nextSlice = sentences.slice(i, i + 3).join(' ')
+            if (nextSlice.length > 240) take = 2
+            const chunk = sentences.slice(i, i + take).join(' ')
+            paras.push(chunk)
+            i += take
+          }
+        }
+
+        return paras.join('\n\n')
+      }
+
+      // Apply smart paragraphing but preserve the greeting on its own followed by a blank line
+      const greetingMatch = body.match(/^(Hi\s[^,]+,)([\s\S]*)/i)
+      if (greetingMatch) {
+        const greet = greetingMatch[1].trim()
+        const rest = greetingMatch[2].trim()
+        const paras = makeParagraphs(rest)
+        body = `${greet}\n\n${paras}`.trim()
+      } else {
+        body = makeParagraphs(body)
+      }
+
+      // Final cleanup: remove any leftover orphan parentheses or double spaces
+      body = body.replace(/\(\(/g, '').replace(/\)\)/g, '')
+      body = body.replace(/\s{2,}/g, ' ')
+
+      // Remove unmatched parentheses safely (skip unmatched closing, then strip extra opens)
+      const removeUnmatchedParens = (text: string) => {
+        let out = ''
+        let depth = 0
+        for (const ch of text) {
+          if (ch === '(') { depth++; out += ch }
+          else if (ch === ')') {
+            if (depth === 0) {
+              // skip unmatched closing
+            } else { depth--; out += ch }
+          } else { out += ch }
+        }
+        // If there are unmatched opening parens left, remove the earliest ones
+        if (depth === 0) return out
+        let res = ''
+        let toRemove = depth
+        for (let i = out.length - 1; i >= 0; i--) {
+          const ch = out[i]
+          if (ch === '(' && toRemove > 0) { toRemove--; continue }
+          res = ch + res
+        }
+        return res
+      }
+
+      body = removeUnmatchedParens(body)
+      // Collapse any leftover empty parenthesis pairs
+      body = body.replace(/\(\s*\)/g, '')
+
+      // If 'Market Update' was requested, focus the content on interest rates and real estate.
+      // Keep the greeting and the first sentence, then filter the rest to sentences matching key terms.
+      if (selectedPrompts.includes('market')) {
+        const gm = body.match(/^(Hi\s[^,]+,)?\s*([\s\S]*)/i)
+        let greet = ''
+        let rest = body
+        if (gm) {
+          greet = (gm[1] || '').trim()
+          rest = (gm[2] || '').trim()
+        }
+
+  const sentences = rest.split(/(?<=[.!?])\s+/g).map((s: string) => s.trim()).filter(Boolean)
+        const keep: string[] = []
+        // Always keep a short opener if present
+        if (sentences.length > 0) keep.push(sentences[0])
+
+        const keywords = /\b(rate|interest|mortgage|mortgage rates|housing|home|real estate|inventory|Fed|fed|interest rate|rates)\b/i
+        for (let i = 1; i < sentences.length; i++) {
+          const s = sentences[i]
+          if (keywords.test(s)) keep.push(s)
+          // Limit kept sentences to a reasonable amount
+          if (keep.length >= 4) break
+        }
+
+        // If filtering removed too much, fallback to original rest
+        const newRest = keep.length > 0 ? keep.join(' ') : rest
+        body = greet ? `${greet}\n\n${newRest}` : newRest
+      }
+
       body = body.replace(/\[Your Name\]/gi, displayName)
       body = sanitizeEmailBody(subject, body)
-      body = cleanPlaceholders(body, (activeClient as any)?.name || undefined, displayName)
+      body = cleanPlaceholders(body, clientName, displayName)
       setDraft(body)
       pushToast({ type:'success', message:'Draft ready' })
     } catch(e:any) {
@@ -543,6 +694,7 @@ Create a separate personalization block for each selected focus area. Context JS
         <div className="mt-4 rounded-lg border border-default bg-surface p-4 min-h-[140px] overflow-auto">
           <div className="text-xs font-semibold text-muted mb-2">Draft Preview - Click to Edit</div>
           {draft ? (
+            <>
             <textarea 
               className="w-full min-h-[120px] text-sm leading-relaxed text-ink email-preview resize-y bg-transparent border-none p-0 focus:outline-none"
               style={{
@@ -554,6 +706,8 @@ Create a separate personalization block for each selected focus area. Context JS
               onChange={(e) => setDraft(e.target.value)}
               placeholder="Your generated email draft will appear here..."
             />
+            {/* Preview removed: keep only the editable textarea so it is the single source of truth */}
+            </>
           ) : (
             <div className="text-xs text-muted">No draft yet.</div>
           )}

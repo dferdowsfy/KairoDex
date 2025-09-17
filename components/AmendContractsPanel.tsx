@@ -262,7 +262,7 @@ const AmendContractsPanel = forwardRef<AmendContractsPanelHandle>(function Amend
         <div className="mt-4">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 items-start">
             {/* Preview Panel */}
-            <div className="contract-preview rounded-xl p-4 border border-slate-200 bg-slate-50 h-[65vh] overflow-auto order-2 lg:order-1">
+            <div className="contract-preview rounded-xl p-4 border border-slate-200 bg-slate-50 max-h-[60vh] overflow-auto order-2 lg:order-1">
               <div className="text-sm font-semibold mb-2 sticky top-0 bg-slate-50/95 backdrop-blur-sm py-1">Contract Preview</div>
               {loadingPreview ? (
                 <div className="text-red-700">Loading contract...</div>

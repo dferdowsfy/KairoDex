@@ -1,7 +1,8 @@
 "use client"
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 
-export type InputtedNote = { id: string; text: string; user_id: string; created_at: string }
+export type StructuredNote = { name?: string; summary?: { budget?: string; email?: string; phone?: string }; sections: { title: string; content: string }[] }
+export type InputtedNote = { id: string; text: string; user_id: string; created_at: string; structured?: StructuredNote }
 
 export function useInputtedNotes(clientId?: string) {
   const qc = useQueryClient()
