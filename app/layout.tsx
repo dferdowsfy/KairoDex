@@ -14,6 +14,7 @@ import { usePathname } from 'next/navigation'
 import CanvasScaler from '@/components/CanvasScaler'
 import A11yAnnouncer from '@/components/A11yAnnouncer'
 import Toast from '@/components/Toast'
+import FeedbackWidget from '@/components/FeedbackWidget'
 
 const inter = Inter({ subsets: ['latin'], variable: '--font-inter' })
 const sora = Sora({ subsets: ['latin'], variable: '--font-sora' })
@@ -60,6 +61,7 @@ export default function RootLayout({ children }: { children: any }) {
           <StickyActionBar />
           <A11yAnnouncer />
           <Toast />
+          <FeedbackWidget />
         </Providers>
   <InstallHint />
       </body>
