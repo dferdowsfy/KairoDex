@@ -32,10 +32,9 @@ export default function StickyActionBar() {
         }}
       >
         <div className="px-3 pb-[calc(env(safe-area-inset-bottom,0px)+10px)] pt-2">
-          <div className="rounded-2xl border border-slate-200 bg-white/95 backdrop-blur shadow-lg grid grid-cols-4 overflow-hidden">
+          <div className="rounded-2xl border border-slate-200 bg-white/95 backdrop-blur shadow-lg grid grid-cols-3 overflow-hidden">
           {(() => {
             const isHome = pathname === '/'
-            const isActions = pathname?.startsWith('/actions')
             const isEmails = pathname?.startsWith('/emails')
             const isChat = !!chatOpen
             const base = 'relative flex flex-col items-center justify-center py-3 text-xs transition-colors'
@@ -67,11 +66,6 @@ export default function StickyActionBar() {
                   <Indicator active={!!isEmails} />
                   <Mail className={iconCls(!!isEmails)} />
                   Emails
-                </Link>
-                <Link href="/actions" className={`${base} ${textCls(!!isActions)}`} aria-current={isActions ? 'page' : undefined}>
-                  <Indicator active={!!isActions} />
-                  <CheckSquare className={iconCls(!!isActions)} />
-                  Actions
                 </Link>
               </>
             )

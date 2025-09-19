@@ -88,8 +88,13 @@ export async function handleChatPOST(req: NextRequest) {
           .order('created_at', { ascending: false })
           .limit(5)
 
+        interface DirectEmail { subject:string; status:string; sent_at:string|null; created_at:string; body_md?:string }
+        interface ScheduledEmail { email_subject:string; status:string; sent_at:string|null; created_at:string; email_content?:string }
+  // Cast fetched rows to typed arrays explicitly to satisfy strict typing
+  const directEmails: DirectEmail[] = (emails || []) as DirectEmail[]
+  const schedEmails: ScheduledEmail[] = (scheduledEmails || []) as ScheduledEmail[]
         emailHistory = [
-          ...(emails || []).map(email => ({
+          ...directEmails.map((email: DirectEmail) => ({
             subject: email.subject,
             status: email.status,
             sent_at: email.sent_at,
@@ -97,7 +102,7 @@ export async function handleChatPOST(req: NextRequest) {
             preview: email.body_md?.substring(0, 150) + '...',
             type: 'direct_email'
           })),
-          ...(scheduledEmails || []).map(email => ({
+          ...schedEmails.map((email: ScheduledEmail) => ({
             subject: email.email_subject,
             status: email.status,
             sent_at: email.sent_at,

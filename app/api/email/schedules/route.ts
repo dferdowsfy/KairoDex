@@ -228,7 +228,9 @@ export async function POST(request: NextRequest) {
     }
 
     // Add to email queue for processing
-    const queueInserts = schedules.map(schedule => ({
+    interface CreatedSchedule { id: string }
+    const createdSchedules = (schedules || []) as CreatedSchedule[]
+    const queueInserts = createdSchedules.map((schedule: CreatedSchedule) => ({
       schedule_id: schedule.id,
       priority: 5
     }))

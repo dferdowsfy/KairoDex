@@ -37,13 +37,17 @@ export async function GET(req: NextRequest) {
       .limit(limit)
 
     // Combine and sort all emails by date
+    interface DirectEmail { id:string; subject:string; body_md?:string; status:string; sent_at:string|null; created_at:string; to_emails?: string[] }
+    interface ScheduledEmail { id:string; email_subject:string; email_content?:string; status:string; sent_at:string|null; created_at:string; recipient_email:string }
+    const directEmails = (emails || []) as DirectEmail[]
+    const schedEmails = (scheduledEmails || []) as ScheduledEmail[]
     const allEmails = [
-      ...(emails || []).map(email => ({
+  ...directEmails.map((email: DirectEmail) => ({
         ...email,
         source: 'emails' as const,
         recipient_email: email.to_emails?.[0] || ''
       })),
-      ...(scheduledEmails || []).map(email => ({
+  ...schedEmails.map((email: ScheduledEmail) => ({
         id: email.id,
         subject: email.email_subject,
         body_md: email.email_content,

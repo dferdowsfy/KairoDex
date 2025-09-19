@@ -17,6 +17,7 @@ import QuickTaskForm, { QuickTaskFormHandle } from '@/components/QuickTaskForm'
 import ReminderCadence from '@/components/ReminderCadence'
 import AddClientModal from '@/components/AddClientModal'
 import Snapshot from '@/components/Snapshot'
+import ClientNotesCallout from '@/components/ClientNotesCallout'
 import NotesHistory from '@/components/NotesHistory'
 import Modal from '@/components/Modal'
 
@@ -79,6 +80,8 @@ export default function HomePage() {
 
   // Refs for forms to trigger save from modal footer
   const taskFormRef = useRef<QuickTaskFormHandle | null>(null)
+  const [taskSaving, setTaskSaving] = useState(false)
+  
   // Contract list state (supabase contract_files)
   interface ContractFile { id:string; contract_name:string; status?:string; version?:number; created_at?:string }
   const [contracts, setContracts] = useState<ContractFile[]>([])
@@ -111,6 +114,14 @@ export default function HomePage() {
           <h1 className="text-[45pt] sm:text-[35pt] leading-tight font-semibold text-slate-900">{greetingText}</h1>
           <div className="text-slate-600">Manage your clients and tasks</div>
           <ClientSelector onAddClient={()=>setShowAdd(true)} />
+          {selectedClientId && (
+            <ClientNotesCallout
+              className="mt-2"
+              onAddNote={()=> {
+                document.dispatchEvent(new CustomEvent('open-add-note'))
+              }}
+            />
+          )}
         </section>
 
         {/* Primary Actions surfaced immediately below greeting for quicker access */}
@@ -243,14 +254,17 @@ export default function HomePage() {
         <button
           onClick={async ()=>{ 
             try {
+              setTaskSaving(true)
               await taskFormRef.current?.save();
             } catch (error) {
               console.error('Task save error:', error);
+            } finally {
+              setTaskSaving(false)
             }
           }}
-          disabled={taskFormRef.current?.isSaving && taskFormRef.current.isSaving()}
+          disabled={taskSaving}
           className="px-5 py-2 rounded-lg bg-slate-900 text-white font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
-        >{taskFormRef.current?.isSaving && taskFormRef.current.isSaving()? 'Saving…' : 'Save'}</button>
+        >{taskSaving ? 'Saving…' : 'Save'}</button>
       </>
     )}
   >

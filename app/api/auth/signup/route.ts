@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { rateLimit, deviceFingerprint } from '@/lib/security/rateLimit'
 import { checkPasswordPolicy } from '@/lib/security/password'
 import { supabaseServer } from '@/lib/supabaseServer'
+import { buildEmailConfirmUrl } from '@/lib/authOrigins'
 
 export async function POST(req: Request) {
   const headers = req.headers
@@ -24,7 +25,10 @@ export async function POST(req: Request) {
   const { data, error } = await (supabase as any).auth.signUp({ 
     email, 
     password, 
-    options: { data: { first_name: firstName, last_name: lastName, name: combinedName || undefined, full_name: combinedName || undefined } } 
+    options: { 
+      emailRedirectTo: buildEmailConfirmUrl(),
+      data: { first_name: firstName, last_name: lastName, name: combinedName || undefined, full_name: combinedName || undefined } 
+    } 
   })
   
   if (error) {

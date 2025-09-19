@@ -6,6 +6,7 @@ Mobile‑first AI‑native real estate CRM built with Next.js App Router, Tailwi
  - Live city market snapshots in Chat (when OPENROUTER_API_KEY is set) with sources
 - Notes → Tiles: paste unstructured notes and get editable tiles for key dates, next steps, contacts, docs, risks. Inline edit and persist to Supabase.
 - Follow-Up composer prefills from NoteItems, with include/exclude checkboxes and email scheduling.
+ - Global Feedback widget (bottom-right) lets authenticated users send structured feedback (liked, disliked, rating, free text) via Resend to the owner email.
 1. Copy env and set values:
 
 ```
@@ -15,7 +16,10 @@ cp .env.local.example .env.local
 Set:
 - NEXT_PUBLIC_SUPABASE_URL=
 - NEXT_PUBLIC_SUPABASE_ANON_KEY=
+ - NEXT_PUBLIC_SITE_URL= (root deployed origin, e.g. https://kairodex.com)
+ - NEXT_PUBLIC_AUTH_BROWSER_ORIGIN= (origin to force auth email links to open in normal browser; dev fallback http://localhost:3000, prod fallback https://www.kairodex.com)
 - OPENROUTER_API_KEY=
+ - RESEND_API_KEY= (required for feedback emails; create at https://resend.com and scope to sending domain)
  - Optional: AI provider keys in `lib/ai.ts` (OPENAI_API_KEY or GEMINI_API_KEY)
  - Optional: MARKET_CACHE_TTL_MS (default 6h), MARKET_OPENROUTER_MODEL (default perplexity/sonar-reasoning-pro)
 
@@ -178,3 +182,38 @@ If a build fails, check the full build log for the first error, then:
 ## Notes
 - Replace logo.svg with your brand asset later.
 - This is a functional scaffold; expand RLS, enums, and migrations as needed.
+ - Feedback emails are sent From: `Feedback <feedback@agenthub.dev>` (adjust domain or from address in `app/api/feedback/route.ts`).
+ - You can customize feedback option lists in `components/FeedbackWidget.tsx` (LIKE_OPTIONS / DISLIKE_OPTIONS arrays).
+
+### Password Reset Flow (Supabase)
+
+1. User clicks `Forgot password?` link (at `/forgot-password`).
+2. They submit their email; we call `supabase.auth.resetPasswordForEmail(email, { redirectTo: SITE_URL + '/reset-password' })` and store the email locally in `localStorage` under `pw-reset-email`.
+3. Supabase sends recovery email. Link opens `https://kairodex.com/reset-password` with either `?token=...&type=recovery` or a URL hash containing `#access_token=...&type=recovery`.
+4. The `/reset-password` page parses query + hash, retrieves stored email, and calls `supabase.auth.verifyOtp({ type: 'recovery', token, email })` unless a session is already present (Supabase may auto-establish session from hash tokens).
+5. On success, user sets a new password (validated client-side) via `supabase.auth.updateUser({ password })`.
+6. Page clears the stored email and redirects to `/login` after confirmation.
+
+Edge cases handled:
+- Missing/expired/invalid token → instructs user to request a new link.
+- Missing stored email → user can manually input email to retry verification.
+- Already authenticated session (from hash) → skip verify step and show password form immediately.
+
+Implementation files:
+- `app/(routes)/forgot-password/page.tsx`
+- `app/reset-password/page.tsx`
+- `app/(routes)/login/page.tsx` & `app/(routes)/signup/page.tsx` include helpful links.
+
+#### Forcing Links to Open in a Regular Browser (Not the Installed PWA)
+
+If you install the PWA at the root origin (e.g. `https://kairodex.com`), OSes will route in-scope links to the standalone window. To force auth email links (confirm, reset) to open in a regular browser tab:
+
+1. Set `NEXT_PUBLIC_AUTH_BROWSER_ORIGIN` (e.g. `https://www.kairodex.com` or better: `https://auth.kairodex.com`).
+2. Signup + forgot-password flows use that origin for Supabase `emailRedirectTo` / `redirectTo`.
+3. `/reset-password` auto-detects PWA standalone and opens the browser-origin URL if different.
+
+Fallback behavior if unset:
+- Dev: `http://localhost:3000`
+- Prod: `https://www.kairodex.com`
+
+

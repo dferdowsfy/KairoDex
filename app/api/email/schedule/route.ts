@@ -39,7 +39,8 @@ export async function POST(req: NextRequest) {
         subject,
         body_html: bodyHtml,
         send_at: sendAt,
-        status: 'scheduled'
+        status: 'scheduled',
+        email_id: email?.id || null
       })
   if (e2) return NextResponse.json({ error: e2.message }, { status: 500 })
   console.log('[email/schedule] queued job', { emailId: email.id, sendAt })

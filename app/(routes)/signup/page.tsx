@@ -72,7 +72,10 @@ export default function SignupPage() {
             <button type="submit" disabled={loading} className="w-full btn-neon">{loading ? 'Creating…' : 'Create account'}</button>
           </form>
           {message && <p className={`text-sm mt-3 ${isError ? 'text-red-600' : 'text-green-600'}`}>{message}</p>}
-          <p className="text-xs text-slate-500 mt-4">Already have an account? <Link href="/login" className="underline">Log in</Link></p>
+          <div className="text-xs text-slate-500 mt-4 space-y-1">
+            <p>Already have an account? <Link href="/login" className="underline">Log in</Link></p>
+            <p>Forgot your password? <Link href="/forgot-password" className="underline">Reset it</Link></p>
+          </div>
         </div>
       </div>
     </main>

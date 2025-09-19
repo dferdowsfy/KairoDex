@@ -10,8 +10,50 @@ import { useClient } from '@/hooks/useClient'
 import { useNoteItems } from '@/hooks/useNoteItems'
 import type { NoteItem } from '@/lib/types'
 import { useEmailJobs } from '@/hooks/useEmailJobs'
+import { useMutation } from '@tanstack/react-query'
 // Removed legacy cadence & modal imports
 import { useClients } from '@/hooks/useClients'
+import { QueryClient } from '@tanstack/react-query'
+
+function EmailJobRow({ job, qc, pushToast }: { job: any, qc: QueryClient, pushToast: Function }) {
+  const [busy, setBusy] = React.useState(false)
+  const handleDelete = async () => {
+    if (busy) return
+    setBusy(true)
+    try {
+      const res = await fetch(`/api/email/jobs/${job.id}`, { method: 'DELETE' })
+      const js = await res.json()
+      if (!res.ok) throw new Error(js?.error || 'Delete failed')
+      pushToast({ type:'success', message:'Deleted scheduled email', subtle: true })
+      await qc.invalidateQueries({ queryKey: ['email_jobs'] })
+    } catch (e:any) {
+      pushToast({ type:'error', message: e?.message || 'Delete failed' })
+    } finally { setBusy(false) }
+  }
+  const handleSendNow = async () => {
+    if (busy) return
+    setBusy(true)
+    try {
+      const res = await fetch(`/api/email/jobs/${job.id}/send-now`, { method: 'POST' })
+      const js = await res.json()
+      if (!res.ok) throw new Error(js?.error || 'Send now failed')
+      pushToast({ type: js.sent? 'success':'error', message: js.sent? 'Email sent':'Failed to send', subtle: true })
+      await qc.invalidateQueries({ queryKey: ['email_jobs'] })
+    } catch (e:any) {
+      pushToast({ type:'error', message: e?.message || 'Send failed' })
+    } finally { setBusy(false) }
+  }
+  return (
+    <li className="flex items-center gap-2 group">
+      <span className="text-sm font-medium text-slate-900 w-40 truncate">{job.send_at ? new Date(job.send_at).toLocaleString() : '—'}</span>
+      <span className="text-sm text-slate-600 flex-1 truncate" title={job.subject}>{job.subject || 'Scheduled email'}</span>
+      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        <button onClick={handleSendNow} disabled={busy} className="px-2 py-0.5 text-xs rounded bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40">Send Now</button>
+        <button onClick={handleDelete} disabled={busy} className="px-2 py-0.5 text-xs rounded bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-40">Delete</button>
+      </div>
+    </li>
+  )
+}
 
 function extractBudget(items: NoteItem[]) {
   const budgetItems = items.filter(i=> i.kind==='financing' || /\bbudget\b/i.test(i.title||'') || /\bbudget\b/i.test(i.body||''))
@@ -134,6 +176,13 @@ export default function Snapshot() {
     React.useEffect(() => {
       if (addOpen) setAddClientId(selectedClientId || '')
     }, [addOpen, selectedClientId])
+
+    // Listen for global event dispatched from Home page callout
+    React.useEffect(() => {
+      const handler = () => { setAddOpen(true) }
+      document.addEventListener('open-add-note', handler as any)
+      return () => document.removeEventListener('open-add-note', handler as any)
+    }, [])
 
   // Compute upcoming reminders for this client (top-of-page display)
   const reminders = useMemo(() => {
@@ -298,10 +347,7 @@ export default function Snapshot() {
                 <div className="font-medium text-slate-900 mb-1">Emails</div>
                 <ul className="space-y-2 text-slate-800">
                   {(emailJobs as any[]).slice(0,4).map((j:any) => (
-                    <li key={j.id || j.send_at} className="flex items-center gap-2">
-                      <span className="text-sm font-medium text-slate-900">{j.send_at || j.scheduled_at ? new Date(j.send_at || j.scheduled_at).toLocaleString() : '—'}</span>
-                      <span className="text-sm text-slate-600 truncate">{j.subject || 'Scheduled email'}</span>
-                    </li>
+                    <EmailJobRow key={j.id || j.send_at} job={j} qc={qc} pushToast={pushToast} />
                   ))}
                 </ul>
               </div>

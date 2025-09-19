@@ -7,6 +7,7 @@ const fetcher = (url: string) => fetch(url).then(r => r.json())
 
 interface EmailRecord {
   id: string
+  job_id?: string
   type: 'sent' | 'scheduled'
   recipient_email: string
   subject: string
@@ -232,14 +233,13 @@ export default function EmailDashboard() {
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Status
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Sender
-                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sender</th>
+                  <th className="px-6 py-3" />
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
                 {filteredEmails.map((email) => (
-                  <tr key={email.id} className="hover:bg-gray-50">
+                  <tr key={email.id} className="hover:bg-gray-50 group">
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div>
                         <div className="text-sm font-medium text-gray-900">
@@ -276,6 +276,38 @@ export default function EmailDashboard() {
                       <div className="text-xs text-gray-500">
                         {email.sender_method === 'oauth_google' ? 'Gmail' : email.sender_method}
                       </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm">
+                      {email.status === 'scheduled' && email.job_id && (
+                        <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity justify-end">
+                          <button
+                            onClick={async () => {
+                              if (!email.job_id) return
+                              if (!confirm('Send this scheduled email now?')) return
+                              const res = await fetch(`/api/email/jobs/${email.job_id}/send-now`, { method: 'POST' })
+                              const js = await res.json()
+                              if (!res.ok) {
+                                alert(js?.error || 'Failed to send now')
+                              }
+                              refetchEmails()
+                            }}
+                            className="px-2 py-1 text-xs rounded bg-emerald-600 text-white hover:bg-emerald-700"
+                          >Send Now</button>
+                          <button
+                            onClick={async () => {
+                              if (!email.job_id) return
+                              if (!confirm('Delete this scheduled email?')) return
+                              const res = await fetch(`/api/email/jobs/${email.job_id}`, { method: 'DELETE' })
+                              const js = await res.json()
+                              if (!res.ok) {
+                                alert(js?.error || 'Failed to delete')
+                              }
+                              refetchEmails()
+                            }}
+                            className="px-2 py-1 text-xs rounded bg-rose-600 text-white hover:bg-rose-700"
+                          >Delete</button>
+                        </div>
+                      )}
                     </td>
                   </tr>
                 ))}

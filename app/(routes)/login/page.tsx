@@ -103,6 +103,9 @@ export default function LoginPage() {
           <form onSubmit={signInEmail} className="space-y-3 text-left">
             <input type="email" required className="w-full h-11 input-neon px-3 text-base" placeholder="Email" value={email} onChange={(e)=>setEmail(e.target.value)} />
             <input type="password" required className="w-full h-11 input-neon px-3 text-base" placeholder="Password" value={password} onChange={(e)=>setPassword(e.target.value)} />
+            <div className="text-right -mt-1">
+              <Link href="/forgot-password" className="text-xs text-slate-500 hover:text-slate-700 underline">Forgot password?</Link>
+            </div>
             <button type="submit" disabled={loading} className="w-full btn-neon">{loading ? 'Signing in…' : 'Sign in'}</button>
           </form>
           ) : (

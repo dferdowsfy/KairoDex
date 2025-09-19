@@ -8,6 +8,8 @@ type DSEnv = {
   DOCUSIGN_USER_ID?: string
   DOCUSIGN_PRIVATE_KEY_BASE64?: string
   DOCUSIGN_ACCOUNT_ID?: string
+  // Optional raw PEM (fallback) so deployments can supply either
+  DOCUSIGN_PRIVATE_KEY?: string
 }
 
 function dsBaseUrl(env: string | undefined) {
@@ -23,17 +25,34 @@ function dsTokenUrl(env: string | undefined) {
   return `https://${dsAccountHost(env)}/oauth/token`
 }
 
-async function getAccessToken(env: DSEnv): Promise<string> {
-  const { DOCUSIGN_CLIENT_ID, DOCUSIGN_USER_ID, DOCUSIGN_PRIVATE_KEY_BASE64, DOCUSIGN_ENV } = env
-  if (!DOCUSIGN_CLIENT_ID || !DOCUSIGN_USER_ID || !DOCUSIGN_PRIVATE_KEY_BASE64) {
-    throw new Error('DocuSign env missing (client id, user id, private key)')
+function resolvePrivateKey(env: DSEnv): { pem: string, source: string } {
+  // Priority: base64 wrapper, else raw PEM, else error
+  if (env.DOCUSIGN_PRIVATE_KEY_BASE64) {
+    try {
+      const decoded = atob(env.DOCUSIGN_PRIVATE_KEY_BASE64)
+      return { pem: decoded, source: 'DOCUSIGN_PRIVATE_KEY_BASE64' }
+    } catch (e) {
+      throw new Error('Failed to base64 decode DOCUSIGN_PRIVATE_KEY_BASE64 – ensure it is a base64 of the full PEM including BEGIN/END lines')
+    }
   }
+  if (env.DOCUSIGN_PRIVATE_KEY) {
+    return { pem: env.DOCUSIGN_PRIVATE_KEY, source: 'DOCUSIGN_PRIVATE_KEY' }
+  }
+  throw new Error('No DocuSign private key provided (set DOCUSIGN_PRIVATE_KEY_BASE64 or DOCUSIGN_PRIVATE_KEY)')
+}
+
+async function getAccessToken(env: DSEnv): Promise<string> {
+  const { DOCUSIGN_CLIENT_ID, DOCUSIGN_USER_ID, DOCUSIGN_ENV } = env
+  if (!DOCUSIGN_CLIENT_ID || !DOCUSIGN_USER_ID) {
+    throw new Error('DocuSign env missing (client id or user id)')
+  }
+
+  const { pem: keyPem, source: keySource } = resolvePrivateKey(env)
   
   try {
-  const iss = DOCUSIGN_CLIENT_ID
-  const sub = DOCUSIGN_USER_ID
-  // Aud must be the account host name (no scheme)
-  const aud = dsAccountHost(DOCUSIGN_ENV)
+    const iss = DOCUSIGN_CLIENT_ID
+    const sub = DOCUSIGN_USER_ID
+    const aud = dsAccountHost(DOCUSIGN_ENV)
     const now = Math.floor(Date.now() / 1000)
 
     const jwtHeader = { alg: 'RS256', typ: 'JWT' }
@@ -52,11 +71,8 @@ async function getAccessToken(env: DSEnv): Promise<string> {
 
     console.log('JWT header and payload prepared')
 
-    // Decode the base64 encoded key to get the proper PEM format
-    const keyPem = atob(DOCUSIGN_PRIVATE_KEY_BASE64)
-    console.log('Private key format check - starts with:', keyPem.substring(0, 50))
-    
-    // Check if the key is in PKCS#1 format and needs conversion
+    console.log('Private key source:', keySource, 'starts with:', keyPem.substring(0, 30))
+
     if (keyPem.includes('RSA PRIVATE KEY')) {
       throw new Error('Private key must be in PKCS#8 format. Please convert your RSA PRIVATE KEY to PRIVATE KEY format using: openssl pkcs8 -topk8 -inform PEM -outform PEM -nocrypt -in rsa_key.pem -out pkcs8_key.pem')
     }
@@ -85,7 +101,11 @@ async function getAccessToken(env: DSEnv): Promise<string> {
     const resp = await fetch(tokenUrl, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: form })
     if (!resp.ok) {
       const errText = await resp.text()
-      console.error('DocuSign token error response:', errText)
+      console.error('DocuSign token error response:', resp.status, errText)
+      // Detect consent requirement
+      if (/consent_required/i.test(errText)) {
+        throw new Error(`Consent required for integration key. Visit /api/docusign/consent then grant access, then retry. Raw: ${resp.status} ${errText}`)
+      }
       throw new Error(`DocuSign token error: ${resp.status} ${errText}`)
     }
     const json = await resp.json()
@@ -140,18 +160,19 @@ function arrayBufferToBase64Url(buffer: ArrayBuffer): string {
 
 export async function POST(req: NextRequest) {
   try {
-    const env = {
+    const env: DSEnv = {
       DOCUSIGN_ENV: process.env.DOCUSIGN_ENV,
       DOCUSIGN_CLIENT_ID: process.env.DOCUSIGN_CLIENT_ID,
       DOCUSIGN_USER_ID: process.env.DOCUSIGN_USER_ID,
       DOCUSIGN_PRIVATE_KEY_BASE64: process.env.DOCUSIGN_PRIVATE_KEY_BASE64,
       DOCUSIGN_ACCOUNT_ID: process.env.DOCUSIGN_ACCOUNT_ID,
-    } as DSEnv
+      DOCUSIGN_PRIVATE_KEY: process.env.DOCUSIGN_PRIVATE_KEY,
+    }
 
     console.log('DocuSign env check:', {
       hasClientId: !!env.DOCUSIGN_CLIENT_ID,
       hasUserId: !!env.DOCUSIGN_USER_ID,
-      hasPrivateKey: !!env.DOCUSIGN_PRIVATE_KEY_BASE64,
+      hasPrivateKey: !!(env.DOCUSIGN_PRIVATE_KEY_BASE64 || env.DOCUSIGN_PRIVATE_KEY),
       hasAccountId: !!env.DOCUSIGN_ACCOUNT_ID,
       environment: env.DOCUSIGN_ENV
     })
@@ -164,9 +185,18 @@ export async function POST(req: NextRequest) {
     let fileName = (name || 'Contract').toString()
     if (!finalText && contractId) {
       const { createClient } = await import('@supabase/supabase-js')
-      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY
-      if (!supabaseUrl || !supabaseKey) throw new Error('Supabase config missing')
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY
+      
+      if (!supabaseUrl || !supabaseKey) {
+        console.error('Supabase config missing for DocuSign:', { 
+          hasUrl: !!supabaseUrl, 
+          hasKey: !!supabaseKey,
+          envKeys: Object.keys(process.env).filter(k => k.includes('SUPABASE'))
+        })
+        throw new Error('Supabase configuration missing')
+      }
+      
       const supabase = createClient(supabaseUrl, supabaseKey)
       const { data: contract, error } = await supabase.from('contract_files').select('*').eq('id', contractId).single()
       if (error || !contract) throw new Error('Contract not found')
@@ -194,7 +224,17 @@ export async function POST(req: NextRequest) {
 
     // Get access token (JWT grant)
     console.log('Getting DocuSign access token...')
-    const accessToken = await getAccessToken(env)
+    let accessToken: string
+    try {
+      accessToken = await getAccessToken(env)
+    } catch (tokenErr: any) {
+      return new Response(JSON.stringify({
+        error: 'Token generation failed',
+        stage: 'token',
+        details: tokenErr?.message,
+        hint: tokenErr?.message?.includes('Consent required') ? 'Open /api/docusign/consent, approve, then retry.' : undefined
+      }), { status: 500, headers: { 'Content-Type': 'application/json' } })
+    }
     console.log('Access token obtained, length:', accessToken.length)
     
     const base = dsBaseUrl(env.DOCUSIGN_ENV)
@@ -228,7 +268,12 @@ export async function POST(req: NextRequest) {
     if (!envResp.ok) {
       const t = await envResp.text()
       console.error('Envelope creation failed:', envResp.status, t)
-      throw new Error(`Create envelope failed: ${envResp.status} ${t}`)
+      return new Response(JSON.stringify({
+        error: 'Envelope creation failed',
+        stage: 'envelope',
+        status: envResp.status,
+        docusign: t
+      }), { status: 500, headers: { 'Content-Type': 'application/json' } })
     }
     const envJson = await envResp.json()
     const envelopeId = envJson.envelopeId
@@ -252,14 +297,19 @@ export async function POST(req: NextRequest) {
     if (!viewResp.ok) {
       const t = await viewResp.text()
       console.error('Sender view creation failed:', viewResp.status, t)
-      throw new Error(`Sender view failed: ${viewResp.status} ${t}`)
+      return new Response(JSON.stringify({
+        error: 'Sender view creation failed',
+        stage: 'sender_view',
+        status: viewResp.status,
+        docusign: t
+      }), { status: 500, headers: { 'Content-Type': 'application/json' } })
     }
     const viewJson = await viewResp.json()
     console.log('Sender view created successfully')
     
     return new Response(JSON.stringify({ url: viewJson.url, envelopeId }), { status: 200, headers: { 'Content-Type': 'application/json' } })
   } catch (e: any) {
-    console.error('DocuSign sender-view error:', e)
-    return new Response(JSON.stringify({ error: e?.message || 'DocuSign error' }), { status: 500 })
+    console.error('DocuSign sender-view error (outer catch):', e)
+    return new Response(JSON.stringify({ error: e?.message || 'DocuSign error', stage: 'unexpected' }), { status: 500, headers: { 'Content-Type': 'application/json' } })
   }
 }
