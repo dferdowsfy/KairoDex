@@ -7,7 +7,26 @@ export async function GET() {
     // supabase-js v2 uses auth.admin.listUsers
     const res: any = await admin.auth.admin.listUsers({ perPage: 100 })
     if (res.error) return new Response(JSON.stringify({ error: res.error.message }), { status: 500, headers: { 'Content-Type': 'application/json' } })
-    const users = res.data?.map((u: any) => ({
+    
+    // Handle different response formats from Supabase
+    let usersData = [];
+    
+    if (Array.isArray(res.data)) {
+      // Direct array format
+      usersData = res.data;
+    } else if (res.data && Array.isArray(res.data.users)) {
+      // Nested users array format
+      usersData = res.data.users;
+    } else if (res.users && Array.isArray(res.users)) {
+      // Response with users at the root
+      usersData = res.users;
+    } else {
+      // Log the structure for debugging
+      console.error('Unexpected users response format:', JSON.stringify(res).slice(0, 200) + '...');
+      usersData = [];
+    }
+    
+    const users = usersData.map((u: any) => ({
       id: u.id,
       email: u.email,
       phone: u.phone,
