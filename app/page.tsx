@@ -103,25 +103,43 @@ export default function HomePage() {
     load()
   }, [selectedClientId])
 
-  // Recovery hash safeguard: if a recovery verification lands on the root (e.g. because redirect_to was /),
-  // immediately forward to /reset-password while preserving hash & email (if present) so the dedicated page logic runs.
+  // Recovery token safeguard: if a recovery verification lands on the root (e.g. because redirect_to was /),
+  // immediately forward to /reset-password while preserving hash, query params & email so the dedicated page logic runs.
   useEffect(() => {
     if (typeof window === 'undefined') return
+    
+    // Check URL hash for recovery tokens
     const h = window.location.hash
-    if (!h) return
-    if (/type=recovery/i.test(h)) {
+    const queryParams = new URLSearchParams(window.location.search)
+    const hasRecoveryHash = h && /type=recovery/i.test(h)
+    const hasRecoveryToken = queryParams.has('token') && queryParams.has('type') && queryParams.get('type')?.toLowerCase() === 'recovery'
+    
+    // Only redirect if we detect recovery data in the URL
+    if (hasRecoveryHash || hasRecoveryToken) {
       try {
-        const hashParams = new URLSearchParams(h.replace(/^#/, ''))
-        const email = hashParams.get('email') || ''
-        const query = new URLSearchParams()
-        if (email) query.set('email', email)
-        // Keep forceBrowser flag consistent if added later
-        const dest = `/reset-password${query.toString() ? `?${query.toString()}` : ''}${h}`
+        // Build destination with all relevant data
+        const query = new URLSearchParams(queryParams)
+        
+        // Add email from hash if present
+        if (h) {
+          const hashParams = new URLSearchParams(h.replace(/^#/, ''))
+          const emailFromHash = hashParams.get('email')
+          if (emailFromHash && !query.has('email')) {
+            query.set('email', emailFromHash)
+          }
+        }
+        
+        // Add forceBrowser flag for PWA escape
+        query.set('forceBrowser', '1')
+        
+        // Build final destination URL
+        const dest = `/reset-password${query.toString() ? `?${query.toString()}` : ''}${h || ''}`
+        
         // Avoid loops: only redirect if not already at /reset-password
         if (!/\/reset-password(\?|$)/.test(window.location.pathname)) {
           if (process.env.NODE_ENV !== 'production') {
             // eslint-disable-next-line no-console
-            console.log('[root-recovery-redirect] forwarding recovery hash to', dest)
+            console.log('[root-recovery-redirect] forwarding recovery data to', dest)
           }
           window.location.replace(dest)
         }

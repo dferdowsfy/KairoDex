@@ -12,9 +12,27 @@ export async function POST(req: Request) {
   const { email, redirectTo } = await req.json()
   if (!email) return NextResponse.json({ error: 'Email required' }, { status: 400 })
   const supabase = supabaseServer()
-  // Prefer provided redirectTo, else our central builder (ensures forceBrowser=1 param)
-  const finalRedirect = redirectTo || buildResetPasswordUrl(email)
-  const { error } = await (supabase as any).auth.resetPasswordForEmail(email, { redirectTo: finalRedirect })
+  
+  // Get site URL from environment with appropriate fallbacks
+  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 
+                 process.env.NEXT_PUBLIC_AUTH_BROWSER_ORIGIN || 
+                 'https://kairodex.com'
+  
+  // Ensure site URL doesn't end with a slash
+  const baseUrl = siteUrl.replace(/\/$/, '')
+  
+  // Explicitly build the redirect URL to ensure it points to the reset-password page
+  const builtRedirect = `${baseUrl}/reset-password?email=${encodeURIComponent(email)}&forceBrowser=1`
+  
+  // Prefer provided redirectTo, else our custom built URL (which ensures forceBrowser=1 param)
+  const finalRedirect = redirectTo || builtRedirect
+  
+  // Ensure the redirect URL contains /reset-password path
+  const validatedRedirect = finalRedirect.includes('/reset-password') 
+    ? finalRedirect 
+    : builtRedirect
+    
+  const { error } = await (supabase as any).auth.resetPasswordForEmail(email, { redirectTo: validatedRedirect })
   if (process.env.NODE_ENV !== 'production') {
     // eslint-disable-next-line no-console
     console.log('[pw-reset] requested for', email, 'redirectTo ->', finalRedirect)
