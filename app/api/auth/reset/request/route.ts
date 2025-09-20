@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { rateLimit, deviceFingerprint } from '@/lib/security/rateLimit'
 import { supabaseServer } from '@/lib/supabaseServer'
+import { buildResetPasswordUrl } from '@/lib/authOrigins'
 
 export async function POST(req: Request) {
   const headers = req.headers
@@ -11,9 +12,13 @@ export async function POST(req: Request) {
   const { email, redirectTo } = await req.json()
   if (!email) return NextResponse.json({ error: 'Email required' }, { status: 400 })
   const supabase = supabaseServer()
-  const { error } = await (supabase as any).auth.resetPasswordForEmail(email, {
-    redirectTo: redirectTo || `${process.env.NEXT_PUBLIC_SITE_URL || ''}/reset-password`
-  })
+  // Prefer provided redirectTo, else our central builder (ensures forceBrowser=1 param)
+  const finalRedirect = redirectTo || buildResetPasswordUrl(email)
+  const { error } = await (supabase as any).auth.resetPasswordForEmail(email, { redirectTo: finalRedirect })
+  if (process.env.NODE_ENV !== 'production') {
+    // eslint-disable-next-line no-console
+    console.log('[pw-reset] requested for', email, 'redirectTo ->', finalRedirect)
+  }
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
   return NextResponse.json({ ok: true })
 }

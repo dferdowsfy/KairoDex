@@ -103,6 +103,37 @@ export default function HomePage() {
     load()
   }, [selectedClientId])
 
+  // Recovery hash safeguard: if a recovery verification lands on the root (e.g. because redirect_to was /),
+  // immediately forward to /reset-password while preserving hash & email (if present) so the dedicated page logic runs.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const h = window.location.hash
+    if (!h) return
+    if (/type=recovery/i.test(h)) {
+      try {
+        const hashParams = new URLSearchParams(h.replace(/^#/, ''))
+        const email = hashParams.get('email') || ''
+        const query = new URLSearchParams()
+        if (email) query.set('email', email)
+        // Keep forceBrowser flag consistent if added later
+        const dest = `/reset-password${query.toString() ? `?${query.toString()}` : ''}${h}`
+        // Avoid loops: only redirect if not already at /reset-password
+        if (!/\/reset-password(\?|$)/.test(window.location.pathname)) {
+          if (process.env.NODE_ENV !== 'production') {
+            // eslint-disable-next-line no-console
+            console.log('[root-recovery-redirect] forwarding recovery hash to', dest)
+          }
+          window.location.replace(dest)
+        }
+      } catch (e) {
+        if (process.env.NODE_ENV !== 'production') {
+          // eslint-disable-next-line no-console
+          console.warn('[root-recovery-redirect] failed to parse hash', e)
+        }
+      }
+    }
+  }, [])
+
   return (
   <main className="min-h-screen" style={{ background: 'linear-gradient(180deg,#F7F3EE,#F3EEE7 60%, #EFE8DF)' }}>
       <div className="max-w-6xl mx-auto px-4 sm:px-6 py-5 space-y-5 has-bottom-nav">

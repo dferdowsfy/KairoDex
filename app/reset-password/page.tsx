@@ -21,6 +21,7 @@ export default function ResetPasswordPage() {
   const [verifyState, setVerifyState] = useState<VerifyState>({ status: 'idle' });
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
+  const [username, setUsername] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
 
@@ -64,9 +65,12 @@ export default function ResetPasswordPage() {
     const qpEmail = search?.get('email');
     if (qpEmail && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(qpEmail)) {
       setEmail(qpEmail);
+      setUsername(qpEmail); // Also set as default username
       try { localStorage.setItem('pw-reset-email', qpEmail); } catch {}
     } else {
-      setEmail(getStoredEmail());
+      const storedEmail = getStoredEmail();
+      setEmail(storedEmail);
+      setUsername(storedEmail); // Also set as default username
     }
   }, [search]);
 
@@ -122,10 +126,19 @@ export default function ResetPasswordPage() {
       const isStandalone = window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone === true;
       if (!isStandalone) return;
       const currentOrigin = window.location.origin;
-      if (AUTH_BROWSER_ORIGIN && AUTH_BROWSER_ORIGIN !== currentOrigin) {
+      const searchParams = new URLSearchParams(window.location.search);
+      const forceBrowser = searchParams.get('forceBrowser') === '1';
+      // Only attempt escape once per load to avoid loops; mark via sessionStorage
+      const ESC_KEY = 'pw-reset-browser-escape';
+      const alreadyTried = sessionStorage.getItem(ESC_KEY) === '1';
+      // We escape if explicit forceBrowser flag OR origins differ
+      const shouldEscape = (AUTH_BROWSER_ORIGIN && AUTH_BROWSER_ORIGIN !== currentOrigin) || forceBrowser;
+      if (shouldEscape && !alreadyTried) {
+        sessionStorage.setItem(ESC_KEY, '1');
         const target = `${AUTH_BROWSER_ORIGIN}/reset-password${window.location.search}${window.location.hash}`;
-        // Open in new window/tab to ensure system browser; don't replace current PWA history yet.
-        window.open(target, '_blank', 'noopener,noreferrer');
+        try {
+          window.open(target, '_blank', 'noopener,noreferrer');
+        } catch {}
       }
     } catch {}
   }, []);
@@ -147,6 +160,13 @@ export default function ResetPasswordPage() {
     e.preventDefault();
     setFormError(null);
     setInfo(null);
+    
+    // Validate username
+    if (!username.trim()) {
+      setFormError('Username/email is required.');
+      return;
+    }
+    
     if (password.length < PASSWORD_MIN) {
       setFormError(`Password must be at least ${PASSWORD_MIN} characters.`);
       return;
@@ -170,7 +190,7 @@ export default function ResetPasswordPage() {
         localStorage.removeItem('supabase-reset-email');
       } catch {}
       setVerifyState({ status: 'success' });
-      setInfo('Password updated successfully. You will be redirected to login shortly...');
+      setInfo(`Password updated successfully for ${username}. You will be redirected to login shortly...`);
       // Redirect after delay
       setTimeout(() => {
         router.push('/login');
@@ -227,6 +247,19 @@ export default function ResetPasswordPage() {
         return (
           <form onSubmit={onSubmit} className="space-y-6" noValidate>
             <div>
+              <label className="block text-sm font-medium mb-1">Username / Email</label>
+              <input
+                type="text"
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                value={username}
+                onChange={e => setUsername(e.target.value)}
+                placeholder="your@email.com"
+                required
+                autoComplete="username email"
+              />
+              <p className="text-xs text-gray-500 mt-1">Confirm the username/email for this account</p>
+            </div>
+            <div>
               <label className="block text-sm font-medium mb-1">New Password</label>
               <input
                 type="password"
@@ -236,6 +269,7 @@ export default function ResetPasswordPage() {
                 minLength={PASSWORD_MIN}
                 required
                 autoComplete="new-password"
+                placeholder={`Minimum ${PASSWORD_MIN} characters`}
               />
             </div>
             <div>
@@ -279,7 +313,7 @@ export default function ResetPasswordPage() {
       <div className="w-full max-w-md">
         <div className="bg-white shadow-sm rounded-lg p-6 md:p-8 border border-gray-100">
           <h1 className="text-xl font-semibold mb-2">Reset Password</h1>
-          <p className="text-sm text-gray-600 mb-6">{verifyState.status === 'needs_new_password' || verifyState.status === 'updating' ? 'Enter a new password for your account.' : 'Processing your reset request.'}</p>
+          <p className="text-sm text-gray-600 mb-6">{verifyState.status === 'needs_new_password' || verifyState.status === 'updating' ? 'Enter your username and new password for your account.' : 'Processing your reset request.'}</p>
           <PwaModeNotice />
           {renderBody()}
         </div>
